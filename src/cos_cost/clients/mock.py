@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from calendar import monthrange
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from cos_cost.clients.parse import (
     parse_buckets,
 )
 from cos_cost.models import BillResourceRow, BillSummary, BucketInfo, MonitorBucketMetrics, MonitorSnapshot
+from cos_cost.monthutil import parse_month
 
 FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "mock_account.json"
 MB_TO_BYTES = 1_000_000.0
@@ -116,7 +118,87 @@ class MockMonitorClient:
                 continue
             by_bucket[name].internet_traffic_bytes = float(raw_bytes)
             by_bucket[name].raw["InternetTraffic"] = {"sum_bytes": raw_bytes}
+        extras = {
+            "StdMultipartStorage": ("multipart_storage_bytes", MB_TO_BYTES),
+            "InternalTraffic": ("internal_traffic_bytes", 1.0),
+            "CdnOriginTraffic": ("cdn_traffic_bytes", 1.0),
+            "GetRequests": ("get_requests", 1.0),
+            "PutRequests": ("put_requests", 1.0),
+            "4xxResponse": ("err_4xx", 1.0),
+            "5xxResponse": ("err_5xx", 1.0),
+        }
+        for metric, (attr, scale) in extras.items():
+            series = raw.get(metric) or {}
+            for name, value in series.items():
+                if name not in by_bucket:
+                    continue
+                setattr(by_bucket[name], attr, float(value) * scale)
+        for name, metrics in by_bucket.items():
+            _attach_daily(metrics, month, raw, name)
         return MonitorSnapshot(by_bucket=by_bucket)
+
+
+def _attach_daily(
+    metrics: MonitorBucketMetrics, month: str, raw: dict[str, Any], name: str
+) -> None:
+    year, mon = (int(part) for part in parse_month(month).split("-"))
+    days = monthrange(year, mon)[1]
+    dates = [f"{year:04d}-{mon:02d}-{day:02d}" for day in range(1, days + 1)]
+    override = (raw.get("daily") or {}).get(name)
+    if isinstance(override, dict) and override.get("dates"):
+        metrics.dates = [str(d) for d in override["dates"]]
+        daily: dict[str, list[float | None]] = {}
+        for key, values in override.items():
+            if key == "dates" or not isinstance(values, list):
+                continue
+            daily[str(key)] = [None if v is None else float(v) for v in values]
+        metrics.daily = daily
+        return
+    metrics.dates = dates
+    daily = {}
+    if metrics.std_storage_bytes is not None:
+        daily["StdStorage"] = _vary_last(metrics.std_storage_bytes / MB_TO_BYTES, days)
+    if metrics.sia_storage_bytes is not None:
+        daily["SiaStorage"] = _vary_last(metrics.sia_storage_bytes / MB_TO_BYTES, days)
+    if metrics.arc_storage_bytes is not None:
+        daily["ArcStorage"] = _vary_last(metrics.arc_storage_bytes / MB_TO_BYTES, days)
+    if metrics.deep_arc_storage_bytes is not None:
+        daily["DeepArcStorage"] = _vary_last(metrics.deep_arc_storage_bytes / MB_TO_BYTES, days)
+    if metrics.multipart_storage_bytes is not None:
+        daily["StdMultipartStorage"] = _vary_last(
+            metrics.multipart_storage_bytes / MB_TO_BYTES, days
+        )
+    if metrics.internet_traffic_bytes is not None:
+        daily["InternetTraffic"] = _vary_sum(metrics.internet_traffic_bytes, days)
+    if metrics.internal_traffic_bytes is not None:
+        daily["InternalTraffic"] = _vary_sum(metrics.internal_traffic_bytes, days)
+    if metrics.cdn_traffic_bytes is not None:
+        daily["CdnOriginTraffic"] = _vary_sum(metrics.cdn_traffic_bytes, days)
+    if metrics.get_requests is not None:
+        daily["GetRequests"] = _vary_sum(metrics.get_requests, days)
+    if metrics.put_requests is not None:
+        daily["PutRequests"] = _vary_sum(metrics.put_requests, days)
+    if metrics.err_4xx is not None:
+        daily["4xxResponse"] = _vary_sum(metrics.err_4xx, days)
+    if metrics.err_5xx is not None:
+        daily["5xxResponse"] = _vary_sum(metrics.err_5xx, days)
+    metrics.daily = daily
+
+
+def _vary_last(last: float, n: int) -> list[float | None]:
+    out: list[float | None] = []
+    for i in range(n):
+        wave = 1.0 + 0.03 * ((i % 7) - 3) / 3.0
+        out.append(max(0.0, last * wave * (0.92 + 0.08 * (i + 1) / n)))
+    return out
+
+
+def _vary_sum(total: float, n: int) -> list[float | None]:
+    if n <= 0:
+        return []
+    weights = [1.0 + 0.25 * ((i % 7) - 3) / 3.0 for i in range(n)]
+    scale = total / sum(weights) if sum(weights) else 0.0
+    return [max(0.0, w * scale) for w in weights]
 
 
 def mock_bundle(

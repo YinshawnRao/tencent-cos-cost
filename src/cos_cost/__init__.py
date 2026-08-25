@@ -1,6 +1,6 @@
 """腾讯云 COS 成本分析 Agent（Phase M1）。"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 COS_BUSINESS_CODE = "p_cos"
 BILLING_ENDPOINT = "billing.tencentcloudapi.com"

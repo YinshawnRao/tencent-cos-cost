@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}账号全局 · COS 机会大师{% endblock %}
+{% block crumb %}<span>账号全局</span>{% endblock %}
+{% block actions %}
+  <button class="btn ghost" type="button" data-m3="export">导出 PDF</button>
+  <button class="btn ghost" type="button" data-m3="export">导出 Excel</button>
+{% endblock %}
+{% block body %}
+<form class="filters" method="get" action="/">
+  <label>时间
+    <input type="month" name="month" value="{{ payload.month }}">
+  </label>
+  <label>地域
+    <select name="region">
+      <option value="">全部</option>
+      {% for region in payload.filters.regions %}
+      <option value="{{ region }}" {% if payload.filters.region == region %}selected{% endif %}>{{ region }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>搜索
+    <input type="search" name="q" value="{{ payload.filters.q }}" placeholder="桶名">
+  </label>
+  <button class="btn" type="submit">筛选</button>
+</form>
+
+<div class="banner {% if payload.estimated %}warn{% endif %}">{{ payload.banner }}</div>
+
+<section class="kpis">
+  <article class="card kpi">
+    <h3>COS 应付</h3>
+    <p class="num">{{ payload.kpis.cos_payable_text }}</p>
+    <p class="sub">环比 {{ payload.kpis.mom_text }} · 同比 {{ payload.kpis.yoy_text }}</p>
+  </article>
+  <article class="card kpi">
+    <h3>可优化金额</h3>
+    <p class="num">{{ payload.kpis.optimizable_text }}{% if payload.kpis.optimizable %}<span class="unit">/月</span>{% endif %}</p>
+    <p class="sub">net ≥ 阈值 · 规则引擎占位</p>
+  </article>
+  <article class="card kpi">
+    <h3>标准存储占比</h3>
+    <p class="num">{{ payload.kpis.standard_text }}</p>
+    <p class="sub">容量口径 · 监控 last</p>
+  </article>
+  <article class="card kpi">
+    <h3>外网下行</h3>
+    <p class="num">{{ payload.kpis.internet_text }}</p>
+    <p class="sub">监控 InternetTraffic</p>
+  </article>
+  <article class="card kpi">
+    <h3>请求费</h3>
+    <p class="num">{{ payload.kpis.request_text }}</p>
+    <p class="sub">读 + 写 · 含失败请求</p>
+  </article>
+  <article class="card kpi">
+    <h3>数据就绪</h3>
+    <p class="num">{{ payload.kpis.ready_text }}</p>
+    <p class="sub">清单 {{ payload.kpis.coverage_text }}</p>
+  </article>
+</section>
+
+<section class="grid-2">
+  <article class="card chart-card">
+    <header><h2>费用趋势</h2><span class="cid">C1</span></header>
+    <div id="chart-c1" class="chart"></div>
+    {% if payload.trend.note %}<p class="hint">{{ payload.trend.note }}</p>{% endif %}
+  </article>
+  <article class="card chart-card">
+    <header><h2>桶费用树图</h2><span class="cid">C2</span></header>
+    <div id="chart-c2" class="chart"></div>
+    <p class="hint">面积 = 应付，颜色 = 环比。点击进入桶页。</p>
+  </article>
+</section>
+
+<section class="grid-2">
+  <article class="card chart-card">
+    <header><h2>计费项构成</h2><span class="cid">C3</span></header>
+    <div class="split">
+      <div id="chart-c3" class="chart sm"></div>
+      <table class="mini">
+          {% for item in payload.composition["items"] %}
+        <tr>
+          <td><i class="swatch" style="background:{{ item.color }}"></i>{{ item.label }}</td>
+          <td>{{ "%.0f"|format(item.pct) }}%</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </article>
+  <article class="card chart-card">
+    <header><h2>存储类型</h2><span class="cid">C4</span></header>
+    <div id="chart-c4" class="chart"></div>
+  </article>
+</section>
+
+<section class="card">
+  <header><h2>桶排行</h2><span class="cid">C5</span></header>
+  <div class="table-wrap">
+    <table class="rank">
+      <thead>
+        <tr>
+          <th>桶</th><th>地域</th><th>应付</th><th>环比</th><th>容量</th>
+          <th>标准%</th><th>外网</th><th>机会</th><th>配置灯</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.ranking %}
+        <tr data-href="/b/{{ row.bucket }}?month={{ payload.month }}">
+          <td><a href="/b/{{ row.bucket }}?month={{ payload.month }}">{{ row.bucket }}</a></td>
+          <td>{{ row.region or "—" }}</td>
+          <td>{{ row.payable_text }}</td>
+          <td class="{% if row.mom_pct and row.mom_pct > 0 %}up{% elif row.mom_pct and row.mom_pct < 0 %}down{% endif %}">{{ row.mom_text }}</td>
+          <td>{{ row.capacity_text }}</td>
+          <td>{{ row.standard_text }}</td>
+          <td>{{ row.internet_text }}</td>
+          <td>{{ row.opportunity_text }}</td>
+          <td class="lights">
+            {% for light in row.lights %}
+            <span class="{% if light.on %}on{% endif %}" title="{{ light.label }}">{{ "●" if light.on else "○" }} {{ light.label }}</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="opp-board">
+  <header class="section-head"><h2>机会榜</h2><span class="muted">占位卡 · 规则引擎为 M3</span></header>
+  <div class="opp-cols">
+    {% for col in payload.opportunities.columns %}
+    <div>
+      <h3>{{ col.label }}</h3>
+      {% for card in col.cards %}
+      <article class="card opp" data-rule="{{ card.rule_id }}">
+        <p class="rid">{{ card.rule_id }} · {{ card.title }}</p>
+        <p class="bucket">{{ card.bucket }}</p>
+        <p class="save">{% if card.net_saving %}¥ {{ "{:,.0f}".format(card.net_saving) }}{% else %}—{% endif %}
+          <span>置信度 {{ card.confidence }}</span></p>
+      </article>
+      {% endfor %}
+      {% if not col.cards %}<p class="hint">暂无占位卡</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+<div id="toast" hidden></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/account.js"></script>
+{% endblock %}

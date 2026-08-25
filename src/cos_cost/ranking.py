@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from cos_cost.billing_items import request_fee_total
 from cos_cost.ext.config_lights import ConfigLightProvider, UnknownConfigLights
 from cos_cost.ext.opportunity import NullOpportunityEngine, OpportunityEngine
 from cos_cost.models import (
@@ -112,14 +113,22 @@ def build_ranking(
                 traffic += metrics.internet_traffic_bytes
                 saw_traffic = True
 
+    opt_total = None
+    list_all = getattr(engine, "list_all", None)
+    if callable(list_all):
+        cards = list_all() or []
+        amounts = [float(c.get("net_saving")) for c in cards if isinstance(c, dict) and c.get("net_saving") is not None]
+        if amounts:
+            opt_total = float(sum(amounts))
+
     kpis = Kpis(
         cos_payable=cos_payable,
         mom_pct=_change_pct(cos_payable, prev_total),
         yoy_pct=_change_pct(cos_payable, yoy_total),
-        optimizable_amount=None,
+        optimizable_amount=opt_total,
         standard_storage_pct=(100.0 * std_num / cap_num) if saw_cap and cap_num > 0 else None,
         internet_traffic_bytes=traffic if saw_traffic else None,
-        request_fee=None,
+        request_fee=request_fee_total(snapshot.bill_resources),
         ready=ready_for_kpi,
         bucket_listed=len(snapshot.buckets),
         bucket_with_bill=sum(1 for name in seen if name in current),
@@ -134,8 +143,10 @@ def build_ranking(
     if snapshot.bill_summary is None and not snapshot.bill_resources:
         if not any("账单" in n or "应付" in n for n in notes):
             notes.append("无账单数据：应付 / 环比为空。")
-    notes.append("机会列与配置灯为 M2/M3 占位，本阶段不探测生命周期或未完成分片。")
-    notes.append("请求费未拆分：M1 只使用 DescribeBillResourceSummary，不翻页 DescribeBillDetail。")
+    if opt_total is None:
+        notes.append("机会列与配置灯为占位；规则引擎与应用到桶属于 M3。")
+    if kpis.request_fee is None:
+        notes.append("请求费未拆分：仅当 ResourceSummary 的 ProductCode 能归到请求类时才汇总。")
 
     return RankingResult(
         month=snapshot.month,

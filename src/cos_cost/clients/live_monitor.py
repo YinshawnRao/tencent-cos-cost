@@ -31,6 +31,14 @@ STORAGE_METRICS = {
 }
 TRAFFIC_METRICS = {
     "InternetTraffic": "internet_traffic_bytes",
+    "InternalTraffic": "internal_traffic_bytes",
+    "CdnOriginTraffic": "cdn_traffic_bytes",
+}
+COUNT_METRICS = {
+    "GetRequests": "get_requests",
+    "PutRequests": "put_requests",
+    "4xxResponse": "err_4xx",
+    "5xxResponse": "err_5xx",
 }
 MB_TO_BYTES = 1_000_000.0
 
@@ -58,8 +66,40 @@ class LiveMonitorClient:
         try:
             for metric, attr in STORAGE_METRICS.items():
                 self._fill(metric, buckets, start_iso, end_iso, by_bucket, attr, kind="last_mb")
-            for metric, attr in TRAFFIC_METRICS.items():
-                self._fill(metric, buckets, start_iso, end_iso, by_bucket, attr, kind="sum_bytes")
+            self._fill(
+                "InternetTraffic",
+                buckets,
+                start_iso,
+                end_iso,
+                by_bucket,
+                "internet_traffic_bytes",
+                kind="sum_bytes",
+            )
+            for metric, attr in {
+                "InternalTraffic": "internal_traffic_bytes",
+                "CdnOriginTraffic": "cdn_traffic_bytes",
+                **COUNT_METRICS,
+            }.items():
+                self._fill(
+                    metric,
+                    buckets,
+                    start_iso,
+                    end_iso,
+                    by_bucket,
+                    attr,
+                    kind="sum_bytes",
+                    optional=True,
+                )
+            self._fill(
+                "StdMultipartStorage",
+                buckets,
+                start_iso,
+                end_iso,
+                by_bucket,
+                "multipart_storage_bytes",
+                kind="last_mb",
+                optional=True,
+            )
         except PermissionDeniedError:
             raise
         except TencentCloudSDKException as exc:
@@ -78,6 +118,7 @@ class LiveMonitorClient:
         attr: str,
         *,
         kind: str,
+        optional: bool = False,
     ) -> None:
         for chunk in _chunks(buckets, MONITOR_MAX_INSTANCES):
             req = models.GetMonitorDataRequest()
@@ -97,6 +138,8 @@ class LiveMonitorClient:
             except TencentCloudSDKException as exc:
                 if is_permission_error(exc):
                     raise PermissionDeniedError("monitor", str(exc)) from exc
+                if optional:
+                    return
                 raise
             payload = model_to_dict(resp)
             for point in payload.get("DataPoints") or []:
@@ -115,6 +158,7 @@ class LiveMonitorClient:
                 raw = by_bucket[name].raw.setdefault(metric, {})
                 raw["values"] = values
                 raw["timestamps"] = point.get("Timestamps")
+                _merge_daily(by_bucket[name], metric, point.get("Timestamps") or [], values, kind)
 
 
 def _bucket_from_dimensions(dims: Any) -> str | None:
@@ -131,3 +175,37 @@ def _bucket_from_dimensions(dims: Any) -> str | None:
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _merge_daily(
+    metrics: MonitorBucketMetrics,
+    metric: str,
+    timestamps: list[Any],
+    values: list[Any],
+    kind: str,
+) -> None:
+    if not timestamps or not values:
+        return
+    from datetime import datetime, timezone
+
+    dates: list[str] = []
+    series: list[float | None] = []
+    for ts, value in zip(timestamps, values, strict=False):
+        try:
+            if isinstance(ts, (int, float)):
+                dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            dates.append(dt.date().isoformat())
+        except (TypeError, ValueError, OSError):
+            continue
+        try:
+            series.append(None if value is None else float(value))
+        except (TypeError, ValueError):
+            series.append(None)
+    if not dates:
+        return
+    if not metrics.dates:
+        metrics.dates = dates
+    metrics.daily[metric] = series
+    _ = kind

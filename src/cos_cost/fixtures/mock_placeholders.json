@@ -1,0 +1,243 @@
+{
+  "opportunities": [
+    {
+      "rule_id": "R03",
+      "title": "未完成分块 42 GB",
+      "bucket": "logs-prod-1250000000",
+      "column": "recycle",
+      "net_saving": 4960,
+      "confidence": 0.9,
+      "evidence": {
+        "StdMultipartStorage": "42.1 GB",
+        "lifecycle_has_abort": false
+      },
+      "formula": "一次性回收 ≈ 未完成分块容量 × 标准存储单价（当月余天折算为月）",
+      "action": "AbortIncompleteMultipartUpload Days=7",
+      "action_draft": "{\n  \"Rules\": [{\n    \"ID\": \"abort-incomplete-mpu-7d\",\n    \"Filter\": { \"Prefix\": \"\" },\n    \"Status\": \"Enabled\",\n    \"AbortIncompleteMultipartUpload\": { \"DaysAfterInitiation\": 7 }\n  }]\n}",
+      "warning": "进行中超过 7 天的分块任务会被中止，请先与业务确认上传 SLA。"
+    },
+    {
+      "rule_id": "R11",
+      "title": "失败请求 11%",
+      "bucket": "tmp-scratch-1250000000",
+      "column": "recycle",
+      "net_saving": 1120,
+      "confidence": 0.8,
+      "evidence": {
+        "4xx+5xx_ratio": "0.11",
+        "note": "失败请求仍计费"
+      },
+      "formula": "请求费 × 失败占比 × 可避免系数",
+      "action": "收敛重试与错误路径，降低 4xx/5xx",
+      "action_draft": "# 草稿：检查客户端重试、签名过期与不存在的 Key。\n# M3 才会生成可应用的生命周期或告警策略。",
+      "warning": null
+    },
+    {
+      "rule_id": "R01",
+      "title": "标准存储超 30 天",
+      "bucket": "logs-prod-1250000000",
+      "column": "steady",
+      "net_saving": 8400,
+      "confidence": 0.55,
+      "evidence": {
+        "StdStorage": "218 TB",
+        "request_density": "low",
+        "basis": "LastModified 代理（清单未就绪，置信度下调）"
+      },
+      "formula": "超 30 天标准容量 × (标准单价 − 低频单价) − 取回预估",
+      "action": "Transition 到 STANDARD_IA，Days=30",
+      "action_draft": "{\n  \"Rules\": [{\n    \"ID\": \"std-to-ia-30d\",\n    \"Filter\": { \"Prefix\": \"\" },\n    \"Status\": \"Enabled\",\n    \"Transitions\": [{ \"Days\": 30, \"StorageClass\": \"STANDARD_IA\" }]\n  }]\n}",
+      "warning": "无清单时只能给桶级结论，前缀级沉降请等 M3 读清单。"
+    },
+    {
+      "rule_id": "R08",
+      "title": "智能分层候选",
+      "bucket": "archive-cold-1250000000",
+      "column": "steady",
+      "net_saving": 3100,
+      "confidence": 0.6,
+      "evidence": {
+        "access_tracking": false,
+        "storage_class": "mixed"
+      },
+      "formula": "冷热混合容量 × 智能分层相对标准的价差",
+      "action": "评估 INTELLIGENT_TIERING，先开访问追踪",
+      "action_draft": "# 草稿：为 archive-cold-1250000000 开启访问追踪后再评估智能分层。",
+      "warning": null
+    },
+    {
+      "rule_id": "R06",
+      "title": "外网未走 CDN",
+      "bucket": "img-cdn-1250000000",
+      "column": "transform",
+      "net_saving": 6200,
+      "confidence": 0.45,
+      "evidence": {
+        "InternetTraffic": "8.1 TB",
+        "CdnOriginTraffic": "low"
+      },
+      "formula": "外网下行 × (COS 外网单价 − CDN 回源/带宽综合单价)",
+      "action": "静态命中走 CDN，桶仅回源",
+      "action_draft": "# 草稿：将 img-cdn-1250000000 源站接入 CDN，关闭直连外网下载。",
+      "warning": "需业务改造域名与鉴权，M3 不会自动改 CDN 配置。"
+    },
+    {
+      "rule_id": "R05",
+      "title": "小文件请求放大",
+      "bucket": "img-cdn-1250000000",
+      "column": "transform",
+      "net_saving": 1020,
+      "confidence": 0.4,
+      "evidence": {
+        "PutRequests": "high",
+        "avg_object_hint": "thumbnail"
+      },
+      "formula": "增量请求费 − 合并写入后的请求费",
+      "action": "合并写入",
+      "action_draft": "# 草稿：缩略图改为打包或队列批量 Put，降低请求次数。",
+      "warning": null
+    },
+    {
+      "rule_id": "R02",
+      "title": "缺失生命周期骨架",
+      "bucket": "logs-prod-1250000000",
+      "column": "steady",
+      "net_saving": null,
+      "confidence": 0.7,
+      "evidence": {
+        "lifecycle_rules": 0
+      },
+      "formula": "配置骨架：7 天中止分块 + 30 天转低频",
+      "action": "组合 R03 + R01 规则草稿",
+      "action_draft": "{\n  \"Rules\": [\n    {\n      \"ID\": \"abort-incomplete-mpu-7d\",\n      \"Status\": \"Enabled\",\n      \"AbortIncompleteMultipartUpload\": { \"DaysAfterInitiation\": 7 }\n    },\n    {\n      \"ID\": \"std-to-ia-30d\",\n      \"Status\": \"Enabled\",\n      \"Transitions\": [{ \"Days\": 30, \"StorageClass\": \"STANDARD_IA\" }]\n    }\n  ]\n}",
+      "warning": "复制草稿后请在控制台人工确认，本工具不会应用到桶。"
+    }
+  ],
+  "config_lights": {
+    "logs-prod-1250000000": {
+      "lifecycle": "risk",
+      "fragments": "risk",
+      "cdn": "none",
+      "versioning": "ok",
+      "backup": "none"
+    },
+    "img-cdn-1250000000": {
+      "lifecycle": "unknown",
+      "fragments": "unknown",
+      "cdn": "risk",
+      "versioning": "unknown",
+      "backup": "none"
+    },
+    "backup-1250000000": {
+      "lifecycle": "unknown",
+      "fragments": "ok",
+      "cdn": "none",
+      "versioning": "unknown",
+      "backup": "ok"
+    }
+  },
+  "config_health": {
+    "_default": [
+      {
+        "key": "lifecycle",
+        "title": "生命周期 Transition",
+        "status": "none",
+        "summary": "未探测。M3 只读拉取生命周期规则。",
+        "rule_ids": []
+      },
+      {
+        "key": "abort",
+        "title": "删除碎片 Abort",
+        "status": "none",
+        "summary": "未探测。",
+        "rule_ids": []
+      },
+      {
+        "key": "versioning",
+        "title": "当前版本",
+        "status": "ok",
+        "summary": "未开启版本控制（占位）。",
+        "rule_ids": []
+      },
+      {
+        "key": "inventory",
+        "title": "清单",
+        "status": "none",
+        "summary": "无清单，对象级建议不可用。",
+        "rule_ids": []
+      },
+      {
+        "key": "replication",
+        "title": "复制",
+        "status": "ok",
+        "summary": "未开启跨地域复制（占位）。",
+        "rule_ids": []
+      },
+      {
+        "key": "access",
+        "title": "访问追踪",
+        "status": "none",
+        "summary": "未开启。",
+        "rule_ids": []
+      },
+      {
+        "key": "intelligent",
+        "title": "智能分层",
+        "status": "none",
+        "summary": "未开启。",
+        "rule_ids": []
+      }
+    ],
+    "logs-prod-1250000000": [
+      {
+        "key": "lifecycle",
+        "title": "生命周期 Transition",
+        "status": "risk",
+        "summary": "无规则，标准 218 TB → R01/R02",
+        "rule_ids": ["R01", "R02"]
+      },
+      {
+        "key": "abort",
+        "title": "删除碎片 Abort",
+        "status": "risk",
+        "summary": "无规则，碎片 42 GB → R03",
+        "rule_ids": ["R03"]
+      },
+      {
+        "key": "versioning",
+        "title": "当前版本",
+        "status": "ok",
+        "summary": "未开启版本控制",
+        "rule_ids": []
+      },
+      {
+        "key": "inventory",
+        "title": "清单",
+        "status": "none",
+        "summary": "无清单，对象级建议不可用",
+        "rule_ids": []
+      },
+      {
+        "key": "replication",
+        "title": "复制",
+        "status": "ok",
+        "summary": "未开启 CRR",
+        "rule_ids": []
+      },
+      {
+        "key": "access",
+        "title": "访问追踪",
+        "status": "none",
+        "summary": "未开启，R01 置信度 0.55",
+        "rule_ids": ["R01"]
+      },
+      {
+        "key": "intelligent",
+        "title": "智能分层",
+        "status": "none",
+        "summary": "未开启",
+        "rule_ids": []
+      }
+    ]
+  }
+}

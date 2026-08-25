@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}COS 机会大师{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/?month={{ payload.month }}">COS 机会大师</a>
+      {% if payload.mock %}<span class="pill mock">mock</span>{% endif %}
+    </div>
+    <nav class="crumb">{% block crumb %}账号全局{% endblock %}</nav>
+    <div class="top-actions">{% block actions %}{% endblock %}</div>
+  </header>
+  {% block body %}{% endblock %}
+  <script type="application/json" id="bootstrap">{{ bootstrap | safe }}</script>
+  <script src="/static/vendor/echarts.min.js"></script>
+  <script src="/static/js/charts.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

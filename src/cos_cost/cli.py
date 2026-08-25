@@ -1,4 +1,4 @@
-"""CLI：collect / rank。默认上一自然月（UTC+8）。"""
+"""CLI：collect / rank / serve。默认上一自然月（UTC+8）。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,10 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging()
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "serve":
+        return _run_serve(args)
+
     try:
         month = parse_month(args.month) if args.month else previous_month_utc8()
     except ValueError as exc:
@@ -70,10 +74,46 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _run_serve(args: argparse.Namespace) -> int:
+    try:
+        if args.month:
+            parse_month(args.month)
+    except ValueError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
+
+    creds = None
+    if not args.mock:
+        try:
+            creds = load_credentials()
+        except MissingCredentialsError as exc:
+            print(f"错误: {exc}", file=sys.stderr)
+            return 2
+        LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
+
+    from cos_cost.web.app import create_app
+    from cos_cost.web.service import DashboardService
+
+    service = DashboardService(
+        mock=args.mock,
+        cache_dir=Path(args.cache_dir).expanduser(),
+        creds=creds,
+        force=args.force,
+    )
+    app = create_app(service)
+    import uvicorn
+
+    host = args.host
+    port = args.port
+    LOG.info("打开 http://%s:%s/  （mock=%s）", host, port, args.mock)
+    uvicorn.run(app, host=host, port=port, log_level="info")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cos_cost",
-        description="腾讯云 COS 成本分析 Agent（Phase M1：拉桶 / 账单 / 桶排行）",
+        description="腾讯云 COS 成本分析 Agent（M1 CLI + M2 只读看板）",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -82,6 +122,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     rank_p = sub.add_parser("rank", help="打印 C5 桶排行（人类表或 --json）")
     _add_common(rank_p)
+
+    serve_p = sub.add_parser("serve", help="启动账号全局 / 桶页（只读 Web）")
+    _add_common(serve_p)
+    serve_p.add_argument("--host", default="0.0.0.0", help="监听地址，默认 0.0.0.0")
+    serve_p.add_argument("--port", type=int, default=18765, help="端口，默认 18765")
     return parser
 
 
@@ -99,7 +144,6 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 def _configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    # 避免 COS SDK DEBUG 把签名头打到日志。
     logging.getLogger("qcloud_cos").setLevel(logging.WARNING)
     logging.getLogger("tencentcloud").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)

@@ -31,6 +31,13 @@
   "months": {
     "2026-07": {
       "ready": 1,
+      "composition": {
+        "storage": 103060,
+        "traffic": 74200,
+        "request": 9160,
+        "retrieval": 0,
+        "other": 0
+      },
       "summary_by_product": {
         "Ready": 1,
         "SummaryTotal": {
@@ -74,11 +81,19 @@
           "ResourceName": "logs-prod",
           "RegionName": "华南地区（广州）",
           "RegionId": 1,
-          "RealTotalCost": "62100.00000000",
-          "TotalCost": "65000.00000000",
-          "CashPayAmount": "62100.00000000",
+          "RealTotalCost": "59620.00000000",
           "OwnerUin": "100000000001",
           "PayerUin": "100000000001"
+        },
+        {
+          "BusinessCode": "p_cos",
+          "BusinessCodeName": "对象存储 COS",
+          "ProductCode": "sp_cos_req",
+          "ProductCodeName": "COS 请求",
+          "ResourceId": "logs-prod-1250000000",
+          "ResourceName": "logs-prod",
+          "RegionName": "华南地区（广州）",
+          "RealTotalCost": "2480.00000000"
         },
         {
           "BusinessCode": "p_cos",
@@ -89,11 +104,17 @@
           "ResourceName": "img-cdn",
           "RegionName": "华东地区（上海）",
           "RegionId": 4,
-          "RealTotalCost": "78400.00000000",
-          "TotalCost": "82000.00000000",
-          "CashPayAmount": "78400.00000000",
-          "OwnerUin": "100000000001",
-          "PayerUin": "100000000001"
+          "RealTotalCost": "74200.00000000"
+        },
+        {
+          "BusinessCode": "p_cos",
+          "BusinessCodeName": "对象存储 COS",
+          "ProductCode": "sp_cos_req",
+          "ProductCodeName": "COS 请求",
+          "ResourceId": "img-cdn-1250000000",
+          "ResourceName": "img-cdn",
+          "RegionName": "华东地区（上海）",
+          "RealTotalCost": "4200.00000000"
         },
         {
           "BusinessCode": "p_cos",
@@ -104,11 +125,17 @@
           "ResourceName": "backup",
           "RegionName": "西南地区（成都）",
           "RegionId": 16,
-          "RealTotalCost": "32100.00000000",
-          "TotalCost": "34000.00000000",
-          "CashPayAmount": "32100.00000000",
-          "OwnerUin": "100000000001",
-          "PayerUin": "100000000001"
+          "RealTotalCost": "31200.00000000"
+        },
+        {
+          "BusinessCode": "p_cos",
+          "BusinessCodeName": "对象存储 COS",
+          "ProductCode": "sp_cos_req",
+          "ProductCodeName": "COS 请求",
+          "ResourceId": "backup-1250000000",
+          "ResourceName": "backup",
+          "RegionName": "西南地区（成都）",
+          "RealTotalCost": "900.00000000"
         },
         {
           "BusinessCode": "p_cos",
@@ -119,11 +146,17 @@
           "ResourceName": "archive-cold",
           "RegionName": "华北地区（北京）",
           "RegionId": 8,
-          "RealTotalCost": "10820.00000000",
-          "TotalCost": "12000.00000000",
-          "CashPayAmount": "10820.00000000",
-          "OwnerUin": "100000000001",
-          "PayerUin": "100000000001"
+          "RealTotalCost": "10420.00000000"
+        },
+        {
+          "BusinessCode": "p_cos",
+          "BusinessCodeName": "对象存储 COS",
+          "ProductCode": "sp_cos_req",
+          "ProductCodeName": "COS 请求",
+          "ResourceId": "archive-cold-1250000000",
+          "ResourceName": "archive-cold",
+          "RegionName": "华北地区（北京）",
+          "RealTotalCost": "400.00000000"
         },
         {
           "BusinessCode": "p_cos",
@@ -134,11 +167,17 @@
           "ResourceName": "tmp-scratch",
           "RegionName": "华南地区（广州）",
           "RegionId": 1,
-          "RealTotalCost": "3000.00000000",
-          "TotalCost": "3000.00000000",
-          "CashPayAmount": "3000.00000000",
-          "OwnerUin": "100000000001",
-          "PayerUin": "100000000001"
+          "RealTotalCost": "1180.00000000"
+        },
+        {
+          "BusinessCode": "p_cos",
+          "BusinessCodeName": "对象存储 COS",
+          "ProductCode": "sp_cos_std",
+          "ProductCodeName": "COS 标准存储",
+          "ResourceId": "tmp-scratch-1250000000",
+          "ResourceName": "tmp-scratch",
+          "RegionName": "华南地区（广州）",
+          "RealTotalCost": "1820.00000000"
         },
         {
           "BusinessCode": "p_cvm",
@@ -199,11 +238,141 @@
           "backup-1250000000": 0,
           "archive-cold-1250000000": 0,
           "tmp-scratch-1250000000": 4100000000000
+        },
+        "StdMultipartStorage": {
+          "logs-prod-1250000000": 42100
+        },
+        "InternalTraffic": {
+          "logs-prod-1250000000": 80000000000,
+          "img-cdn-1250000000": 400000000000,
+          "backup-1250000000": 12000000000
+        },
+        "CdnOriginTraffic": {
+          "img-cdn-1250000000": 900000000000
+        },
+        "GetRequests": {
+          "logs-prod-1250000000": 42000000,
+          "img-cdn-1250000000": 180000000,
+          "tmp-scratch-1250000000": 9000000
+        },
+        "PutRequests": {
+          "logs-prod-1250000000": 18000000,
+          "img-cdn-1250000000": 22000000,
+          "tmp-scratch-1250000000": 4000000
+        },
+        "4xxResponse": {
+          "logs-prod-1250000000": 2100000,
+          "img-cdn-1250000000": 5400000,
+          "tmp-scratch-1250000000": 1100000
+        },
+        "5xxResponse": {
+          "logs-prod-1250000000": 180000,
+          "img-cdn-1250000000": 320000,
+          "tmp-scratch-1250000000": 90000
         }
       }
     },
+    "2026-02": {
+      "ready": 1,
+      "composition": {
+        "storage": 92000,
+        "traffic": 36000,
+        "request": 7200,
+        "retrieval": 2800,
+        "other": 10000
+      },
+      "summary_by_product": {
+        "Ready": 1,
+        "SummaryOverview": [
+          {
+            "BusinessCode": "p_cos",
+            "BusinessCodeName": "对象存储 COS",
+            "RealTotalCost": "148000.00000000",
+            "BillMonth": "2026-02"
+          }
+        ]
+      },
+      "resources": [],
+      "monitor": {}
+    },
+    "2026-03": {
+      "ready": 1,
+      "composition": {
+        "storage": 96000,
+        "traffic": 38000,
+        "request": 7600,
+        "retrieval": 3000,
+        "other": 10400
+      },
+      "summary_by_product": {
+        "Ready": 1,
+        "SummaryOverview": [
+          {
+            "BusinessCode": "p_cos",
+            "BusinessCodeName": "对象存储 COS",
+            "RealTotalCost": "155000.00000000",
+            "BillMonth": "2026-03"
+          }
+        ]
+      },
+      "resources": [],
+      "monitor": {}
+    },
+    "2026-04": {
+      "ready": 1,
+      "composition": {
+        "storage": 99000,
+        "traffic": 40000,
+        "request": 8000,
+        "retrieval": 3200,
+        "other": 10800
+      },
+      "summary_by_product": {
+        "Ready": 1,
+        "SummaryOverview": [
+          {
+            "BusinessCode": "p_cos",
+            "BusinessCodeName": "对象存储 COS",
+            "RealTotalCost": "161000.00000000",
+            "BillMonth": "2026-04"
+          }
+        ]
+      },
+      "resources": [],
+      "monitor": {}
+    },
+    "2026-05": {
+      "ready": 1,
+      "composition": {
+        "storage": 102000,
+        "traffic": 42000,
+        "request": 8400,
+        "retrieval": 3400,
+        "other": 10700
+      },
+      "summary_by_product": {
+        "Ready": 1,
+        "SummaryOverview": [
+          {
+            "BusinessCode": "p_cos",
+            "BusinessCodeName": "对象存储 COS",
+            "RealTotalCost": "166500.00000000",
+            "BillMonth": "2026-05"
+          }
+        ]
+      },
+      "resources": [],
+      "monitor": {}
+    },
     "2026-06": {
       "ready": 1,
+      "composition": {
+        "storage": 98000,
+        "traffic": 52000,
+        "request": 8800,
+        "retrieval": 3600,
+        "other": 9800
+      },
       "summary_by_product": {
         "Ready": 1,
         "SummaryTotal": {

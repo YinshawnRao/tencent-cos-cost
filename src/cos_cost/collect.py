@@ -290,6 +290,15 @@ def _monitor_to_payload(snap: MonitorSnapshot) -> dict[str, Any]:
             "arc_storage_bytes": metrics.arc_storage_bytes,
             "deep_arc_storage_bytes": metrics.deep_arc_storage_bytes,
             "internet_traffic_bytes": metrics.internet_traffic_bytes,
+            "multipart_storage_bytes": metrics.multipart_storage_bytes,
+            "internal_traffic_bytes": metrics.internal_traffic_bytes,
+            "cdn_traffic_bytes": metrics.cdn_traffic_bytes,
+            "get_requests": metrics.get_requests,
+            "put_requests": metrics.put_requests,
+            "err_4xx": metrics.err_4xx,
+            "err_5xx": metrics.err_5xx,
+            "dates": metrics.dates,
+            "daily": metrics.daily,
         }
     return out
 
@@ -310,6 +319,15 @@ def _monitor_from_payload(payload: dict[str, Any]) -> MonitorSnapshot:
                 arc_storage_bytes=_f(item.get("arc_storage_bytes")),
                 deep_arc_storage_bytes=_f(item.get("deep_arc_storage_bytes")),
                 internet_traffic_bytes=_f(item.get("internet_traffic_bytes")),
+                multipart_storage_bytes=_f(item.get("multipart_storage_bytes")),
+                internal_traffic_bytes=_f(item.get("internal_traffic_bytes")),
+                cdn_traffic_bytes=_f(item.get("cdn_traffic_bytes")),
+                get_requests=_f(item.get("get_requests")),
+                put_requests=_f(item.get("put_requests")),
+                err_4xx=_f(item.get("err_4xx")),
+                err_5xx=_f(item.get("err_5xx")),
+                dates=list(item.get("dates") or []),
+                daily=dict(item.get("daily") or {}),
             )
     notes = payload.get("notes") or []
     if not isinstance(notes, list):

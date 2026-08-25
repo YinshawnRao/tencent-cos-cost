@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ payload.bucket }} · COS 机会大师{% endblock %}
+{% block crumb %}
+  <a href="/?month={{ payload.month }}">账号全局</a>
+  <span class="sep">/</span>
+  <span>{{ payload.bucket }}</span>
+{% endblock %}
+{% block actions %}
+  <button class="btn ghost" type="button" data-m3="export">复制规则草稿</button>
+  <button class="btn ghost" type="button" data-m3="export">导出本桶</button>
+{% endblock %}
+{% block body %}
+<form class="filters" method="get" action="/b/{{ payload.bucket }}">
+  <label>页面
+    <select disabled><option>桶页</option></select>
+  </label>
+  <label>时间
+    <input type="month" name="month" value="{{ payload.month }}">
+  </label>
+  <button class="btn" type="submit">切换账期</button>
+</form>
+
+<section class="bucket-hero">
+  <div>
+    <h1>{{ payload.bucket }}</h1>
+    <p class="meta">
+      <span>{{ payload.region or "—" }}</span>
+      <span>{{ payload.az }}</span>
+      {% if payload.created %}<span>创建 {{ payload.created }}</span>{% endif %}
+    </p>
+  </div>
+  <div class="kpis compact">
+    <article class="card kpi"><h3>本月应付</h3><p class="num">{{ payload.kpis.payable_text }}</p></article>
+    <article class="card kpi"><h3>容量</h3><p class="num">{{ payload.kpis.capacity_text }}</p></article>
+    <article class="card kpi"><h3>可优化</h3><p class="num">{{ payload.kpis.optimizable_text }}</p></article>
+  </div>
+</section>
+
+<div class="tabs">
+  <a href="#bill">账单</a>
+  <a href="#usage">用量</a>
+  <a href="#monitor">监控</a>
+  <span class="tab-note">清单缺 → 前缀表关闭</span>
+</div>
+
+<section id="bill" class="grid-2">
+  <article class="card chart-card">
+    <header><h2>存储类型构成</h2><span class="cid">C7</span></header>
+    <div id="chart-c7" class="chart"></div>
+  </article>
+  <article class="card chart-card">
+    <header><h2>该桶计费项</h2><span class="cid">C8</span></header>
+    <div id="chart-c8" class="chart"></div>
+  </article>
+</section>
+
+<section id="usage" class="grid-3">
+  <article class="card chart-card">
+    <header><h2>日趋势</h2><span class="cid">C6</span></header>
+    <div id="chart-c6" class="chart"></div>
+    {% if payload.c6.note %}<p class="hint">{{ payload.c6.note }}</p>{% endif %}
+  </article>
+  <article class="card chart-card">
+    <header><h2>流量</h2><span class="cid">C9</span></header>
+    <div id="chart-c9" class="chart"></div>
+  </article>
+  <article class="card chart-card">
+    <header><h2>请求</h2><span class="cid">C10</span></header>
+    <div id="chart-c10" class="chart"></div>
+    {% if payload.c10.note %}<p class="hint">{{ payload.c10.note }}</p>{% endif %}
+  </article>
+</section>
+
+<section id="monitor" class="card">
+  <header><h2>配置体检</h2>
+    <span class="legend"><i class="ok"></i>正常 <i class="none"></i>未开 <i class="risk"></i>风险</span>
+  </header>
+  <div class="health-grid">
+    {% for item in payload.health %}
+    <article class="health {{ item.status }}">
+      <h3>{{ item.title }}</h3>
+      <p>{{ item.summary }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card empty-prefix">
+  <header><h2>前缀热点</h2><span class="cid">C11</span></header>
+  <p class="empty-state">{{ payload.prefix_message }}</p>
+</section>
+
+<section class="bucket-ops">
+  <div>
+    <header class="section-head"><h2>该桶机会</h2></header>
+    {% for card in payload.opportunities %}
+    <article class="card opp clickable" data-open="{{ loop.index0 }}">
+      <p class="rid">{{ card.rule_id }} · {{ card.title }}</p>
+      <p class="save">{% if card.net_saving %}¥ {{ "{:,.0f}".format(card.net_saving) }}/月{% else %}—{% endif %}
+        <span>置信度 {{ card.confidence }}</span></p>
+    </article>
+    {% endfor %}
+    {% if not payload.opportunities %}<p class="hint">本桶暂无占位机会卡。</p>{% endif %}
+  </div>
+</section>
+
+<aside id="drawer" class="drawer" hidden>
+  <div class="drawer-inner">
+    <button class="close" type="button" id="drawer-close">关闭</button>
+    <h2 id="drawer-title"></h2>
+    <h3>证据</h3>
+    <pre id="drawer-evidence"></pre>
+    <h3>公式</h3>
+    <p id="drawer-formula"></p>
+    <h3>建议动作</h3>
+    <p id="drawer-action"></p>
+    <pre id="drawer-draft"></pre>
+    <p class="warn" id="drawer-warning"></p>
+    <button class="btn" type="button" id="copy-draft">复制草稿</button>
+  </div>
+</aside>
+<div id="toast" hidden></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/bucket.js"></script>
+{% endblock %}

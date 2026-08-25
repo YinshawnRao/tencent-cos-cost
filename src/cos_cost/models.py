@@ -72,6 +72,15 @@ class MonitorBucketMetrics:
     arc_storage_bytes: float | None = None
     deep_arc_storage_bytes: float | None = None
     internet_traffic_bytes: float | None = None
+    multipart_storage_bytes: float | None = None
+    internal_traffic_bytes: float | None = None
+    cdn_traffic_bytes: float | None = None
+    get_requests: float | None = None
+    put_requests: float | None = None
+    err_4xx: float | None = None
+    err_5xx: float | None = None
+    dates: list[str] = field(default_factory=list)
+    daily: dict[str, list[float | None]] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property

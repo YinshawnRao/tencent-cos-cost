@@ -11,6 +11,26 @@ from cos_cost.models import RankingResult, RankingRow
 TB = 1_000_000_000_000.0
 
 
+def money_text(value: float | None) -> str:
+    return _money(value)
+
+
+def pct_text(value: float | None, *, signed: bool = True) -> str:
+    return _pct(value, signed=signed)
+
+
+def volume_text(nbytes: float | None) -> str:
+    return _volume(nbytes)
+
+
+def opportunity_text(row: RankingRow) -> str:
+    return _opportunity(row)
+
+
+def ready_label(ready: int | None, estimated: bool) -> str:
+    return _ready_label(ready, estimated)
+
+
 def ranking_json(result: RankingResult) -> str:
     payload = result.to_dict()
     payload["ready_label"] = _ready_label(result.ready, result.estimated)
@@ -105,7 +125,7 @@ def _lights(row: RankingRow) -> str:
     parts: list[str] = []
     for key, label in LIGHT_LABELS:
         status = data.get(key, "unknown")
-        mark = "●" if status in {"on", "ok", "yes", "true"} else "○"
+        mark = "●" if status in {"on", "yes", "true", "risk"} else "○"
         parts.append(f"{label}{mark}")
     return " ".join(parts)
 
