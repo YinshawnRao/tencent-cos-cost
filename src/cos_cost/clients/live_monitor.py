@@ -1,0 +1,133 @@
+"""云监控只读：GetMonitorData。Region 固定 ap-guangzhou。"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Any
+
+from tencentcloud.common import credential
+from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.monitor.v20180724 import models, monitor_client
+
+from cos_cost import MONITOR_NAMESPACE, MONITOR_REGION
+from cos_cost.clients.errors import PermissionDeniedError, is_permission_error
+from cos_cost.clients.protocols import model_to_dict
+from cos_cost.models import MonitorBucketMetrics, MonitorSnapshot
+from cos_cost.monthutil import month_bounds_utc8
+from cos_cost.secrets import Credentials
+
+# 官方文档（2018-07-24）单次最多 10 个实例；产品说明提到 50。取 10 以免被拒。
+MONITOR_MAX_INSTANCES = 10
+# 存储类：MB，取 last；流量类：B，取 sum。Period=86400。
+STORAGE_METRICS = {
+    "StdStorage": "std_storage_bytes",
+    "MazStdStorage": "maz_std_storage_bytes",
+    "SiaStorage": "sia_storage_bytes",
+    "MazIaStorage": "maz_ia_storage_bytes",
+    "ArcStorage": "arc_storage_bytes",
+    "DeepArcStorage": "deep_arc_storage_bytes",
+}
+TRAFFIC_METRICS = {
+    "InternetTraffic": "internet_traffic_bytes",
+}
+MB_TO_BYTES = 1_000_000.0
+
+
+class LiveMonitorClient:
+    def __init__(self, creds: Credentials) -> None:
+        cred = credential.Credential(creds.secret_id, creds.secret_key, creds.token)
+        http_profile = HttpProfile()
+        http_profile.endpoint = "monitor.tencentcloudapi.com"
+        client_profile = ClientProfile()
+        client_profile.httpProfile = http_profile
+        self._client = monitor_client.MonitorClient(cred, MONITOR_REGION, client_profile)
+
+    def pull_cos_metrics(self, month: str, buckets: list[str]) -> MonitorSnapshot:
+        if not buckets:
+            return MonitorSnapshot()
+        start, end = month_bounds_utc8(month)
+        start_iso = start.isoformat()
+        # EndTime 用账期最后一秒（UTC+8），避免落到下一月。
+        end_iso = (end - timedelta(seconds=1)).isoformat()
+        by_bucket: dict[str, MonitorBucketMetrics] = {
+            name: MonitorBucketMetrics(bucket=name) for name in buckets
+        }
+        notes: list[str] = []
+        try:
+            for metric, attr in STORAGE_METRICS.items():
+                self._fill(metric, buckets, start_iso, end_iso, by_bucket, attr, kind="last_mb")
+            for metric, attr in TRAFFIC_METRICS.items():
+                self._fill(metric, buckets, start_iso, end_iso, by_bucket, attr, kind="sum_bytes")
+        except PermissionDeniedError:
+            raise
+        except TencentCloudSDKException as exc:
+            if is_permission_error(exc):
+                raise PermissionDeniedError("monitor", str(exc)) from exc
+            notes.append(f"监控拉取部分失败: {exc}")
+        return MonitorSnapshot(by_bucket=by_bucket, notes=notes)
+
+    def _fill(
+        self,
+        metric: str,
+        buckets: list[str],
+        start_iso: str,
+        end_iso: str,
+        by_bucket: dict[str, MonitorBucketMetrics],
+        attr: str,
+        *,
+        kind: str,
+    ) -> None:
+        for chunk in _chunks(buckets, MONITOR_MAX_INSTANCES):
+            req = models.GetMonitorDataRequest()
+            params = {
+                "Namespace": MONITOR_NAMESPACE,
+                "MetricName": metric,
+                "Period": 86400,
+                "StartTime": start_iso,
+                "EndTime": end_iso,
+                "Instances": [
+                    {"Dimensions": [{"Name": "bucket", "Value": name}]} for name in chunk
+                ],
+            }
+            req.from_json_string(__import__("json").dumps(params))
+            try:
+                resp = self._client.GetMonitorData(req)
+            except TencentCloudSDKException as exc:
+                if is_permission_error(exc):
+                    raise PermissionDeniedError("monitor", str(exc)) from exc
+                raise
+            payload = model_to_dict(resp)
+            for point in payload.get("DataPoints") or []:
+                if not isinstance(point, dict):
+                    continue
+                name = _bucket_from_dimensions(point.get("Dimensions") or [])
+                if not name or name not in by_bucket:
+                    continue
+                values = [v for v in (point.get("Values") or []) if v is not None]
+                if not values:
+                    continue
+                if kind == "last_mb":
+                    setattr(by_bucket[name], attr, float(values[-1]) * MB_TO_BYTES)
+                else:
+                    setattr(by_bucket[name], attr, float(sum(float(v) for v in values)))
+                raw = by_bucket[name].raw.setdefault(metric, {})
+                raw["values"] = values
+                raw["timestamps"] = point.get("Timestamps")
+
+
+def _bucket_from_dimensions(dims: Any) -> str | None:
+    if not isinstance(dims, list):
+        return None
+    for dim in dims:
+        if not isinstance(dim, dict):
+            continue
+        if str(dim.get("Name") or dim.get("name")) == "bucket":
+            value = dim.get("Value") or dim.get("value")
+            return str(value) if value else None
+    return None
+
+
+def _chunks(items: list[str], size: int) -> list[list[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]

@@ -1,0 +1,44 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:GetService"
+      ],
+      "resource": [
+        "*"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:HeadBucket"
+      ],
+      "resource": [
+        "qcs::cos:*:uid/${appid}:*/*",
+        "qcs::cos:*:uid/${appid}:*"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "finance:DescribeBill*",
+        "finance:DescribeResourceBill*",
+        "finance:DescribeDosage*"
+      ],
+      "resource": [
+        "*"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "monitor:GetMonitorData"
+      ],
+      "resource": [
+        "*"
+      ]
+    }
+  ]
+}
