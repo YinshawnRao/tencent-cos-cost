@@ -29,10 +29,18 @@ def build_bundle(
     from cos_cost.clients.live_monitor import LiveMonitorClient
 
     account = (os.environ.get("COS_APPID") or "").strip() or "unknown"
+    from cos_cost.clients.throttle import RateLimiter
+    from cos_cost.limits import billing_qps, cos_max_inflight, cos_qps
+    import threading
+
     return ClientBundle(
         account_key=account,
-        cos=LiveCosClient(creds),
-        billing=LiveBillingClient(creds),
+        cos=LiveCosClient(
+            creds,
+            limiter=RateLimiter(cos_qps()),
+            inflight=threading.Semaphore(cos_max_inflight()),
+        ),
+        billing=LiveBillingClient(creds, limiter=RateLimiter(billing_qps())),
         monitor=LiveMonitorClient(creds),
         mock=False,
     )

@@ -57,6 +57,42 @@ class MockCosClient:
                 return item.get("Location") or fallback_region
         return fallback_region
 
+    def _config(self, bucket: str) -> dict[str, Any]:
+        block = (self.fixture.get("bucket_config") or {}).get(bucket) or {}
+        return block if isinstance(block, dict) else {}
+
+    def get_bucket_lifecycle(self, bucket: str, region: str | None) -> dict[str, Any]:
+        if self.deny:
+            raise PermissionDeniedError("cos", "mock: GetBucketLifecycle denied")
+        raw = self._config(bucket).get("lifecycle")
+        return raw if isinstance(raw, dict) else {}
+
+    def get_bucket_versioning(self, bucket: str, region: str | None) -> dict[str, Any]:
+        if self.deny:
+            raise PermissionDeniedError("cos", "mock: GetBucketVersioning denied")
+        status = self._config(bucket).get("versioning")
+        if isinstance(status, dict):
+            return status
+        if status:
+            return {"Status": status}
+        return {}
+
+    def get_bucket_logging(self, bucket: str, region: str | None) -> dict[str, Any]:
+        if self.deny:
+            raise PermissionDeniedError("cos", "mock: GetBucketLogging denied")
+        raw = self._config(bucket).get("logging")
+        return raw if isinstance(raw, dict) else {}
+
+    def list_bucket_inventory(self, bucket: str, region: str | None) -> list[dict[str, Any]]:
+        if self.deny:
+            raise PermissionDeniedError("cos", "mock: GetBucketInventory denied")
+        raw = self._config(bucket).get("inventory")
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        if isinstance(raw, dict):
+            return [raw]
+        return []
+
 
 class MockBillingClient:
     def __init__(self, fixture: dict[str, Any], *, deny: bool = False) -> None:
@@ -96,9 +132,20 @@ class MockMonitorClient:
         self.fixture = fixture
         self.deny = deny
 
-    def pull_cos_metrics(self, month: str, buckets: list[str]) -> MonitorSnapshot:
+    def pull_cos_metrics(
+        self,
+        month: str,
+        buckets: list[str],
+        *,
+        metrics=None,
+        cancel=None,
+        progress=None,
+    ) -> MonitorSnapshot:
         if self.deny:
             raise PermissionDeniedError("monitor", "mock: GetMonitorData denied")
+        from cos_cost.clients.errors import check_cancel
+
+        check_cancel(cancel)
         months = self.fixture.get("months") or {}
         block = months.get(month) or {}
         raw = block.get("monitor") or {}

@@ -22,6 +22,25 @@ a { color: var(--brand); text-decoration: none; }
 .crumb .sep { margin: 0 8px; color: #64748b; }
 .crumb a { color: #93c5fd; }
 .pill { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #334155; margin-left: 8px; }
+.pill.live { background: #166534; }
+.settings-inner .close, .drawer .close {
+  border: 0; background: transparent; cursor: pointer; color: var(--muted);
+}
+.settings-panel {
+  position: fixed; inset: 0 0 0 auto; width: min(420px, 100%);
+  background: #fff; box-shadow: -8px 0 24px rgba(15,23,42,.12); z-index: 25; overflow: auto;
+}
+.settings-inner { padding: 16px; }
+.settings-inner header { display: flex; justify-content: space-between; align-items: center; }
+.settings-inner h2 { margin: 0; font-size: 16px; }
+.settings-inner form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.settings-inner label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.settings-inner input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.btn.ghost.dark { color: var(--ink); border-color: var(--line); background: #fff; }
+.settings-progress { color: var(--brand); font-size: 13px; }
+.settings-error { color: var(--up); font-size: 13px; }
+.saved-line { color: #166534; font-size: 13px; margin: 8px 0 0; }
 .btn { border: 0; background: var(--brand); color: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
 .btn.ghost { background: transparent; color: #e2e8f0; border: 1px solid #334155; }
 .filters {
@@ -65,6 +84,11 @@ a { color: var(--brand); text-decoration: none; }
 .opp-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding: 8px 20px 24px; }
 .opp .rid { font-weight: 650; margin: 0 0 4px; }
 .opp .bucket { margin: 0; color: var(--muted); font-size: 12px; }
+.opp .why { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.ask-bar { margin: 0 20px 8px; }
+.ask-bar form { display: flex; gap: 8px; align-items: end; }
+.ask-bar input { min-width: 360px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+#ask-answer { margin-top: 8px; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; }
 .opp .save { margin: 8px 0 0; font-weight: 700; }
 .opp .save span { font-weight: 500; color: var(--muted); font-size: 12px; margin-left: 8px; }
 .opp.clickable { cursor: pointer; }

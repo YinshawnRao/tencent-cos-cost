@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 
 from cos_cost.billing_items import request_fee_total
-from cos_cost.ext.config_lights import ConfigLightProvider, UnknownConfigLights
-from cos_cost.ext.opportunity import NullOpportunityEngine, OpportunityEngine
+from cos_cost.ext.config_lights import ConfigLightProvider
+from cos_cost.ext.opportunity import OpportunityEngine
 from cos_cost.models import (
     BillResourceRow,
     CollectSnapshot,
@@ -22,12 +22,25 @@ def build_ranking(
     opportunity: OpportunityEngine | None = None,
     lights: ConfigLightProvider | None = None,
 ) -> RankingResult:
-    engine = opportunity or NullOpportunityEngine()
-    light_provider = lights or UnknownConfigLights()
+    if opportunity is None:
+        from cos_cost.ext.opportunity import RuleEngine
+
+        engine: OpportunityEngine = RuleEngine(snapshot)
+    else:
+        engine = opportunity
+    if lights is None:
+        from cos_cost.ext.config_lights import SnapshotConfigLights
+
+        light_provider: ConfigLightProvider = SnapshotConfigLights(snapshot)
+    else:
+        light_provider = lights
 
     current = _aggregate_payable(snapshot.bill_resources)
     previous = _aggregate_payable(snapshot.prev_bill_resources)
     regions = {b.name: b.region for b in snapshot.buckets}
+    if snapshot.config:
+        for extra in snapshot.config.extra_buckets:
+            regions.setdefault(extra.name, extra.region)
 
     bucket_names: list[str] = []
     seen: set[str] = set()
@@ -35,6 +48,11 @@ def build_ranking(
         if bucket.name not in seen:
             bucket_names.append(bucket.name)
             seen.add(bucket.name)
+    if snapshot.config:
+        for extra in snapshot.config.extra_buckets:
+            if extra.name not in seen:
+                bucket_names.append(extra.name)
+                seen.add(extra.name)
     for resource_id in current:
         if resource_id not in seen:
             bucket_names.append(resource_id)
@@ -114,12 +132,20 @@ def build_ranking(
                 saw_traffic = True
 
     opt_total = None
-    list_all = getattr(engine, "list_all", None)
-    if callable(list_all):
-        cards = list_all() or []
-        amounts = [float(c.get("net_saving")) for c in cards if isinstance(c, dict) and c.get("net_saving") is not None]
-        if amounts:
-            opt_total = float(sum(amounts))
+    kpi_fn = getattr(engine, "kpi_total", None)
+    if callable(kpi_fn):
+        opt_total = kpi_fn()
+    else:
+        list_all = getattr(engine, "list_all", None)
+        if callable(list_all):
+            cards = list_all() or []
+            amounts = [
+                float(c.get("net_saving"))
+                for c in cards
+                if isinstance(c, dict) and c.get("in_kpi") and c.get("net_saving") is not None
+            ]
+            if amounts:
+                opt_total = float(sum(amounts))
 
     kpis = Kpis(
         cos_payable=cos_payable,
@@ -143,8 +169,12 @@ def build_ranking(
     if snapshot.bill_summary is None and not snapshot.bill_resources:
         if not any("账单" in n or "应付" in n for n in notes):
             notes.append("无账单数据：应付 / 环比为空。")
-    if opt_total is None:
-        notes.append("机会列与配置灯为占位；规则引擎与应用到桶属于 M3。")
+    if snapshot.config and snapshot.config.extra_buckets:
+        extra_names = "、".join(b.name for b in snapshot.config.extra_buckets)
+        notes.append(f"R12 已纳入清单/日志目标桶: {extra_names}")
+    notes.append(
+        "可优化 = 规则净节省 ≥ 50 元/月且无强阻断；不含 R05/R07/R08/R09、R06（不含 CDN 下行）、备份桶。"
+    )
     if kpis.request_fee is None:
         notes.append("请求费未拆分：仅当 ResourceSummary 的 ProductCode 能归到请求类时才汇总。")
 

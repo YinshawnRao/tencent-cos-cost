@@ -6,11 +6,13 @@ import argparse
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 from cos_cost.cache import FileCache
+from cos_cost.clients.errors import CollectCancelled
 from cos_cost.clients.factory import build_bundle
-from cos_cost.collect import collect
+from cos_cost.collect import attach_cancel, collect
 from cos_cost.formatters import collect_json, ranking_json, ranking_table
 from cos_cost.monthutil import parse_month, previous_month_utc8
 from cos_cost.ranking import build_ranking
@@ -27,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         return _run_serve(args)
+    if args.command == "export":
+        return _run_export(args)
 
     try:
         month = parse_month(args.month) if args.month else previous_month_utc8()
@@ -47,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
 
     bundle = build_bundle(mock=args.mock, creds=creds)
-    snapshot = collect(bundle, month, cache, force=args.force, creds=creds)
+    snapshot = _collect_with_sigint(bundle, month, cache, force=args.force, creds=creds)
+    if snapshot is None:
+        return 130
 
     if args.command == "collect":
         hits = ", ".join(snapshot.cache_hits) if snapshot.cache_hits else "无（已回源）"
@@ -74,14 +80,39 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _run_serve(args: argparse.Namespace) -> int:
+def _collect_with_sigint(bundle, month, cache, *, force, creds):
+    import signal
+
+    cancel = threading.Event()
+
+    def _on_sigint(signum, frame):  # noqa: ARG001
+        cancel.set()
+        attach_cancel(bundle, cancel)
+        LOG.info("收到中断，正在停止拉取（当前腾讯云 SDK 调用结束后生效）…")
+
+    prev = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _on_sigint)
     try:
-        if args.month:
-            parse_month(args.month)
+        return collect(bundle, month, cache, force=force, creds=creds, cancel=cancel)
+    except CollectCancelled:
+        print("已停止拉取。", file=sys.stderr)
+        return None
+    finally:
+        signal.signal(signal.SIGINT, prev)
+
+
+def _run_export(args: argparse.Namespace) -> int:
+    try:
+        month = parse_month(args.month) if args.month else previous_month_utc8()
     except ValueError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
+    if not args.pdf and not args.xlsx:
+        print("错误: 请指定 --pdf 和/或 --xlsx 输出路径", file=sys.stderr)
+        return 2
 
+    cache_dir = Path(args.cache_dir).expanduser()
+    cache = FileCache(cache_dir)
     creds = None
     if not args.mock:
         try:
@@ -91,21 +122,85 @@ def _run_serve(args: argparse.Namespace) -> int:
             return 2
         LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
 
+    from cos_cost.ext.export import ReportExporter, build_report_payload
+    from cos_cost.web.service import DashboardService
+
+    bundle = build_bundle(mock=args.mock, creds=creds)
+    snapshot = _collect_with_sigint(bundle, month, cache, force=args.force, creds=creds)
+    if snapshot is None:
+        return 130
+    ranking = build_ranking(snapshot)
+    service = DashboardService(
+        mock=args.mock, cache_dir=cache_dir, creds=creds, force=args.force
+    )
+    account = service.account(month)
+    payload = build_report_payload(
+        snapshot,
+        ranking,
+        composition={item["key"]: item["value"] for item in account["composition"]["items"]},
+        trend=account.get("trend"),
+    )
+    exporter = ReportExporter()
+    if args.pdf:
+        dest = Path(args.pdf).expanduser()
+        exporter.write_pdf(payload, dest)
+        print(f"已写 PDF {dest}")
+    if args.xlsx:
+        dest = Path(args.xlsx).expanduser()
+        exporter.write_xlsx(payload, dest)
+        print(f"已写 Excel {dest}")
+    return 0
+
+
+def _run_serve(args: argparse.Namespace) -> int:
+    try:
+        if args.month:
+            parse_month(args.month)
+    except ValueError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
+
+    from cos_cost.local_creds import default_local_creds_path, load_local_creds
+    from cos_cost.secrets import mask_secret_id
     from cos_cost.web.app import create_app
     from cos_cost.web.service import DashboardService
 
+    creds = None
+    mock = bool(args.mock)
+    preferred_month = parse_month(args.month) if args.month else None
+    creds_path = default_local_creds_path()
+    stored = load_local_creds(creds_path)
+    if not mock and stored:
+        creds = stored.credentials
+        preferred_month = preferred_month or stored.month
+        LOG.info("从 .local-creds.json 载入 SecretId=%s（SecretKey 已隐藏）", mask_secret_id(creds.secret_id))
+    elif not mock:
+        try:
+            creds = load_credentials()
+            LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
+        except MissingCredentialsError:
+            mock = True
+            LOG.info("未找到密钥，以 mock 启动。请在页面粘贴只读子用户 AK/SK 后点「保存并拉取」。")
+
     service = DashboardService(
-        mock=args.mock,
+        mock=mock,
         cache_dir=Path(args.cache_dir).expanduser(),
         creds=creds,
         force=args.force,
+        creds_path=creds_path,
     )
+    if preferred_month:
+        service.preferred_month = preferred_month
+    if stored and stored.model_api_key:
+        service.model_api_key = stored.model_api_key
     app = create_app(service)
     import uvicorn
 
     host = args.host
     port = args.port
-    LOG.info("打开 http://%s:%s/  （mock=%s）", host, port, args.mock)
+    LOG.info("打开 http://%s:%s/  （mode=%s）", host, port, "mock" if service.mock else "live")
+    LOG.info("本机测试请勿把 serve 暴露到公网。")
+    LOG.info("Ctrl+C 应能退出；若卡住可用 kill -9 $(lsof -tiTCP:%s)", port)
     uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 
@@ -113,7 +208,7 @@ def _run_serve(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cos_cost",
-        description="腾讯云 COS 成本分析 Agent（M1 CLI + M2 只读看板）",
+        description="腾讯云 COS 成本分析 Agent（M1 CLI + M2 看板 + M3 规则/导出/问答）",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -127,6 +222,11 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common(serve_p)
     serve_p.add_argument("--host", default="0.0.0.0", help="监听地址，默认 0.0.0.0")
     serve_p.add_argument("--port", type=int, default=18765, help="端口，默认 18765")
+
+    export_p = sub.add_parser("export", help="导出一页 PDF / 五表 Excel")
+    _add_common(export_p)
+    export_p.add_argument("--pdf", help="PDF 输出路径")
+    export_p.add_argument("--xlsx", help="Excel 输出路径")
     return parser
 
 

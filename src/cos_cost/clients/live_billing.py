@@ -18,6 +18,7 @@ from cos_cost.clients.parse import (
 )
 from cos_cost.clients.protocols import model_to_dict
 from cos_cost.clients.throttle import RateLimiter
+from cos_cost.limits import billing_qps
 from cos_cost.models import BillResourceRow, BillSummary
 from cos_cost.secrets import Credentials
 
@@ -33,7 +34,12 @@ class LiveBillingClient:
         client_profile.httpProfile = http_profile
         # 账单为地域无关接口；SDK 仍要求 Region 字符串，传空。
         self._client = billing_client.BillingClient(cred, "", client_profile)
-        self._limiter = limiter or RateLimiter(5.0)
+        self._limiter = limiter or RateLimiter(billing_qps())
+        self._cancel = None
+
+    def set_cancel(self, cancel) -> None:
+        self._cancel = cancel
+        self._limiter.set_cancel(cancel)
 
     def describe_bill_summary_by_product(self, month: str) -> BillSummary:
         req = models.DescribeBillSummaryByProductRequest()
@@ -65,7 +71,7 @@ class LiveBillingClient:
         rows: list[BillResourceRow] = []
         offset = 0
         while True:
-            self._limiter.wait()
+            self._limiter.wait(self._cancel)
             req = models.DescribeBillResourceSummaryRequest()
             req.Offset = offset
             req.Limit = PAGE_LIMIT

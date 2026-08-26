@@ -36,6 +36,12 @@ def test_live_without_credentials_fails(monkeypatch, cache_dir, capsys) -> None:
     assert "COS_SECRET_ID" in err
 
 
+def test_export_requires_output(cache_dir, capsys) -> None:
+    code = main(["export", "--mock", "--month", "2026-07", "--cache-dir", str(cache_dir)])
+    assert code == 2
+    assert "--pdf" in capsys.readouterr().err
+
+
 def test_cli_does_not_print_secret(monkeypatch, cache_dir, capsys) -> None:
     monkeypatch.setenv("COS_SECRET_ID", "AKIDdummy")
     monkeypatch.setenv("COS_SECRET_KEY", "super-secret-value-do-not-print")

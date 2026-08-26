@@ -2,8 +2,9 @@
 {% block title %}账号全局 · COS 机会大师{% endblock %}
 {% block crumb %}<span>账号全局</span>{% endblock %}
 {% block actions %}
-  <button class="btn ghost" type="button" data-m3="export">导出 PDF</button>
-  <button class="btn ghost" type="button" data-m3="export">导出 Excel</button>
+  <button class="btn ghost" type="button" id="open-settings">密钥</button>
+  <button class="btn ghost" type="button" data-export="pdf">导出 PDF</button>
+  <button class="btn ghost" type="button" data-export="xlsx">导出 Excel</button>
 {% endblock %}
 {% block body %}
 <form class="filters" method="get" action="/">
@@ -25,6 +26,61 @@
 </form>
 
 <div class="banner {% if payload.estimated %}warn{% endif %}">{{ payload.banner }}</div>
+{% if payload.settings and payload.settings.job and payload.settings.job.status == "running" %}
+<div class="banner" id="collect-job-banner">正在{{ payload.settings.job.phase or "拉取" }}{% if payload.settings.job.buckets_total %} {{ payload.settings.job.buckets_done }}/{{ payload.settings.job.buckets_total }}{% endif %}…</div>
+{% endif %}
+{% if payload.settings and payload.settings.last_collect_error %}
+<div class="banner warn" id="collect-error">{{ payload.settings.last_collect_error }}</div>
+{% endif %}
+{% if payload.settings and payload.settings.last_collect_warning %}
+<div class="banner warn">{{ payload.settings.last_collect_warning }}</div>
+{% endif %}
+
+<aside id="settings-panel" class="settings-panel" hidden>
+  <div class="settings-inner">
+    <header>
+      <h2>本机密钥</h2>
+      <button class="close" type="button" id="close-settings">关闭</button>
+    </header>
+    <p class="hint">仅限本机测试，不要把 serve 暴露到公网。请用只读子用户（<code>docs/cam-m1.json</code>），不要授予 GetBucket（列对象）。密钥保存在内存与 gitignore 的 <code>.local-creds.json</code>（chmod 600），不会写入 cache / HTML / 导出。</p>
+    <p class="saved-line" id="settings-saved" hidden></p>
+    <form id="settings-form">
+      <label>SecretId
+        <input type="text" name="secret_id" id="settings-secret-id" autocomplete="off" spellcheck="false" placeholder="AKIDxxxxxxxx">
+      </label>
+      <label>SecretKey
+        <input type="password" name="secret_key" id="settings-secret-key" autocomplete="new-password" placeholder="不会回显">
+      </label>
+      <label>COS_TOKEN（可选，临时密钥）
+        <input type="password" name="token" id="settings-token" autocomplete="new-password">
+      </label>
+      <label>账期
+        <input type="month" name="month" id="settings-month" value="{{ payload.month }}">
+      </label>
+      <label>模型 API Key（未使用，问答仍走模板）
+        <input type="password" name="model_api_key" id="settings-model-key" autocomplete="new-password" placeholder="预留，当前不用">
+      </label>
+      <p class="settings-progress" id="settings-progress" hidden>正在拉取…</p>
+      <p class="settings-error" id="settings-error" hidden></p>
+      <div class="settings-actions">
+        <button class="btn" type="submit">保存并拉取</button>
+        <button class="btn ghost dark" type="button" id="settings-stop" hidden>停止拉取</button>
+        <button class="btn ghost dark" type="button" id="settings-mock">改用 mock 数据</button>
+        <button class="btn ghost dark" type="button" id="settings-clear">清除密钥</button>
+      </div>
+    </form>
+  </div>
+</aside>
+
+<section class="ask-bar">
+  <form id="ask-form">
+    <label>问答
+      <input type="search" id="ask-q" name="q" placeholder="这个月为什么贵 / logs-prod 怎么省 / 导出上月一页">
+    </label>
+    <button class="btn" type="submit">提问</button>
+  </form>
+  <div id="ask-answer" hidden></div>
+</section>
 
 <section class="kpis">
   <article class="card kpi">
@@ -35,7 +91,7 @@
   <article class="card kpi">
     <h3>可优化金额</h3>
     <p class="num">{{ payload.kpis.optimizable_text }}{% if payload.kpis.optimizable %}<span class="unit">/月</span>{% endif %}</p>
-    <p class="sub">net ≥ 阈值 · 规则引擎占位</p>
+    <p class="sub">net ≥ 50 元/月 · 规则引擎</p>
   </article>
   <article class="card kpi">
     <h3>标准存储占比</h3>
@@ -127,20 +183,21 @@
 </section>
 
 <section class="opp-board">
-  <header class="section-head"><h2>机会榜</h2><span class="muted">占位卡 · 规则引擎为 M3</span></header>
+  <header class="section-head"><h2>机会榜</h2><span class="muted">规则引擎 · 本月可回收 / 下月起稳态 / 需业务改造</span></header>
   <div class="opp-cols">
     {% for col in payload.opportunities.columns %}
     <div>
       <h3>{{ col.label }}</h3>
       {% for card in col.cards %}
-      <article class="card opp" data-rule="{{ card.rule_id }}">
+      <article class="card opp clickable" data-rule="{{ card.rule_id }}" data-href="/b/{{ card.bucket }}?month={{ payload.month }}">
         <p class="rid">{{ card.rule_id }} · {{ card.title }}</p>
         <p class="bucket">{{ card.bucket }}</p>
+        <p class="why">{{ card.why or card.formula }}</p>
         <p class="save">{% if card.net_saving %}¥ {{ "{:,.0f}".format(card.net_saving) }}{% else %}—{% endif %}
           <span>置信度 {{ card.confidence }}</span></p>
       </article>
       {% endfor %}
-      {% if not col.cards %}<p class="hint">暂无占位卡</p>{% endif %}
+      {% if not col.cards %}<p class="hint">暂无规则命中</p>{% endif %}
     </div>
     {% endfor %}
   </div>

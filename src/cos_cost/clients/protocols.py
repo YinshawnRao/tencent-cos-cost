@@ -12,7 +12,19 @@ class CosReadClient(Protocol):
         """GET Service。返回 (Owner.ID / APPID, buckets)。"""
 
     def head_bucket_region(self, bucket: str, fallback_region: str | None) -> str | None:
-        """可选 HeadBucket，仅确认地域。禁止 GetBucket。"""
+        """可选 HeadBucket，仅确认地域。禁止 GetBucket（列对象）。"""
+
+    def get_bucket_lifecycle(self, bucket: str, region: str | None) -> dict[str, Any]:
+        """GetBucketLifecycle。缺失规则时返回空 dict。禁止 List Objects。"""
+
+    def get_bucket_versioning(self, bucket: str, region: str | None) -> dict[str, Any]:
+        """GetBucketVersioning。"""
+
+    def get_bucket_logging(self, bucket: str, region: str | None) -> dict[str, Any]:
+        """GetBucketLogging。"""
+
+    def list_bucket_inventory(self, bucket: str, region: str | None) -> list[dict[str, Any]]:
+        """ListBucketInventory / GetBucketInventory。不读清单 CSV、不 List Objects。"""
 
 
 class BillingReadClient(Protocol):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class PermissionDeniedError(RuntimeError):
     """CAM 未授权或密钥无对应接口权限。"""
@@ -11,8 +13,18 @@ class PermissionDeniedError(RuntimeError):
         super().__init__(message)
 
 
+class CollectCancelled(RuntimeError):
+    """用户点了停止拉取，或进程收到 SIGINT。"""
+
+
+def check_cancel(cancel: Any | None) -> None:
+    if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+        raise CollectCancelled("已停止拉取")
+
+
 class TransientApiError(RuntimeError):
     """限流或短暂故障。"""
+
 
 
 def is_permission_error(exc: BaseException) -> bool:
