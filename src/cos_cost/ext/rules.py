@@ -106,11 +106,8 @@ def _r03(
     share = (mpu_bytes / cap) if cap else 0.0
     missing_abort = cfg is None or not cfg.has_abort()
     material = gb >= MPU_GB_MIN or share >= MPU_SHARE_MIN
-    if not material and not missing_abort:
+    if not material and not (missing_abort and gb > 0):
         return []
-    if not material and missing_abort and gb < MPU_GB_MIN:
-        # 无碎片或很小：仍提示缺 Abort，金额按实际 GB（可能为 0）
-        pass
     net = round(gb * prices.p_std.value, 2) if gb > 0 else None
     title = f"未完成分块 {gb:.1f} GB" if gb > 0 else "缺少 AbortIncompleteMultipartUpload"
     evidence = {
