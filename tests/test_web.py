@@ -24,8 +24,10 @@ def test_api_account_ranking_mock(cache_dir) -> None:
     assert logs["payable"] == 62100.0
     assert data["kpis"]["cos_payable"] == 186420.0
     assert data["ready"] == 1
-    assert "secret" not in resp.text.lower()
+    assert "secret_key" not in resp.text.lower()
     assert "COS_SECRET_KEY" not in resp.text
+    assert data["settings"]["mode"] == "mock"
+    assert data["settings"]["secret_id_masked"] is None
 
 
 def test_pages_render(cache_dir) -> None:

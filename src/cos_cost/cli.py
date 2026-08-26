@@ -133,30 +133,46 @@ def _run_serve(args: argparse.Namespace) -> int:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
 
-    creds = None
-    if not args.mock:
-        try:
-            creds = load_credentials()
-        except MissingCredentialsError as exc:
-            print(f"错误: {exc}", file=sys.stderr)
-            return 2
-        LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
-
+    from cos_cost.local_creds import default_local_creds_path, load_local_creds
+    from cos_cost.secrets import mask_secret_id
     from cos_cost.web.app import create_app
     from cos_cost.web.service import DashboardService
 
+    creds = None
+    mock = bool(args.mock)
+    preferred_month = parse_month(args.month) if args.month else None
+    creds_path = default_local_creds_path()
+    stored = load_local_creds(creds_path)
+    if not mock and stored:
+        creds = stored.credentials
+        preferred_month = preferred_month or stored.month
+        LOG.info("从 .local-creds.json 载入 SecretId=%s（SecretKey 已隐藏）", mask_secret_id(creds.secret_id))
+    elif not mock:
+        try:
+            creds = load_credentials()
+            LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
+        except MissingCredentialsError:
+            mock = True
+            LOG.info("未找到密钥，以 mock 启动。请在页面粘贴只读子用户 AK/SK 后点「保存并拉取」。")
+
     service = DashboardService(
-        mock=args.mock,
+        mock=mock,
         cache_dir=Path(args.cache_dir).expanduser(),
         creds=creds,
         force=args.force,
+        creds_path=creds_path,
     )
+    if preferred_month:
+        service.preferred_month = preferred_month
+    if stored and stored.model_api_key:
+        service.model_api_key = stored.model_api_key
     app = create_app(service)
     import uvicorn
 
     host = args.host
     port = args.port
-    LOG.info("打开 http://%s:%s/  （mock=%s）", host, port, args.mock)
+    LOG.info("打开 http://%s:%s/  （mode=%s）", host, port, "mock" if service.mock else "live")
+    LOG.info("本机测试请勿把 serve 暴露到公网。")
     uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +23,21 @@ from cos_cost.ext.config_lights import SnapshotConfigLights
 from cos_cost.ext.opportunity import RuleEngine
 from cos_cost.ext.placeholders import COLUMN_LABELS
 from cos_cost.formatters import money_text, pct_text, ready_label, volume_text
+from cos_cost.local_creds import (
+    clear_local_creds,
+    default_local_creds_path,
+    load_local_creds,
+    save_local_creds,
+)
 from cos_cost.models import CollectSnapshot, RankingResult, RankingRow
 from cos_cost.monthutil import parse_month, previous_month_utc8, shift_month
 from cos_cost.ranking import build_ranking
-from cos_cost.secrets import Credentials
+from cos_cost.secrets import (
+    Credentials,
+    classify_collect_error,
+    mask_secret_id,
+    sanitize_error_text,
+)
 
 MB = 1_000_000.0
 
@@ -38,16 +50,168 @@ class DashboardService:
         cache_dir: Path,
         creds: Credentials | None = None,
         force: bool = False,
+        creds_path: Path | None = None,
     ) -> None:
-        self.mock = mock
         self.cache = FileCache(cache_dir)
-        self.creds = creds
         self.force = force
+        self.creds_path = Path(creds_path) if creds_path else default_local_creds_path()
+        self.preferred_month: str | None = None
+        self.model_api_key: str | None = None
+        self.last_collect_error: str | None = None
+        self.last_collect_warning: str | None = None
+        if creds is None and not mock:
+            stored = load_local_creds(self.creds_path)
+            if stored:
+                creds = stored.credentials
+                mock = False
+                self.preferred_month = stored.month
+                self.model_api_key = stored.model_api_key
+        self.mock = mock
+        self.creds = creds
         self.bundle: ClientBundle = build_bundle(mock=mock, creds=creds)
         self.fixture = load_fixture() if mock else {}
 
     def default_month(self) -> str:
+        if self.preferred_month:
+            try:
+                return parse_month(self.preferred_month)
+            except ValueError:
+                pass
         return previous_month_utc8()
+
+    def settings_status(self) -> dict[str, Any]:
+        err = self.last_collect_error
+        warn = self.last_collect_warning
+        if self.creds:
+            err = (
+                sanitize_error_text(
+                    err, secret_key=self.creds.secret_key, secret_id=self.creds.secret_id
+                )
+                if err
+                else None
+            )
+            warn = (
+                sanitize_error_text(
+                    warn, secret_key=self.creds.secret_key, secret_id=self.creds.secret_id
+                )
+                if warn
+                else None
+            )
+        return {
+            "mode": "live" if not self.mock else "mock",
+            "secret_id_masked": mask_secret_id(self.creds.secret_id) if self.creds else None,
+            "month": self.default_month(),
+            "saved": bool(self.creds) and not self.mock,
+            "model_key_saved": bool(self.model_api_key),
+            "last_collect_error": err,
+            "last_collect_warning": warn,
+            "local_only": True,
+        }
+
+    def save_credentials(
+        self,
+        *,
+        secret_id: str,
+        secret_key: str,
+        token: str | None = None,
+        month: str | None = None,
+        model_api_key: str | None = None,
+    ) -> dict[str, Any]:
+        sid = (secret_id or "").strip()
+        skey = (secret_key or "").strip()
+        if not skey and self.creds:
+            skey = self.creds.secret_key
+        if not sid or not skey:
+            raise ValueError("需要 SecretId 与 SecretKey")
+        tok = (token or "").strip() or (self.creds.token if self.creds else None)
+        if month:
+            month = parse_month(month)
+        model_key = (model_api_key or "").strip() or self.model_api_key
+        creds = Credentials(secret_id=sid, secret_key=skey, token=tok)
+        save_local_creds(
+            creds, self.creds_path, month=month, model_api_key=model_key
+        )
+        self.creds = creds
+        self.mock = False
+        self.preferred_month = month
+        self.model_api_key = model_key
+        self.fixture = {}
+        self.last_collect_error = None
+        self.last_collect_warning = None
+        try:
+            self.bundle = build_bundle(mock=False, creds=creds)
+        except Exception as exc:  # noqa: BLE001 — 展示给本机 UI，不把密钥带回页面
+            self.last_collect_error = classify_collect_error(
+                sanitize_error_text(str(exc), secret_key=skey, secret_id=sid)
+            )
+            return self.settings_status()
+        self._snapshot(month or self.default_month(), force=True)
+        return self.settings_status()
+
+    def use_mock(self) -> dict[str, Any]:
+        clear_local_creds(self.creds_path)
+        self.creds = None
+        self.mock = True
+        self.model_api_key = None
+        self.preferred_month = None
+        self.last_collect_error = None
+        self.last_collect_warning = None
+        self.fixture = load_fixture()
+        self.bundle = build_bundle(mock=True)
+        return self.settings_status()
+
+    def _snapshot(self, month: str, *, force: bool | None = None) -> CollectSnapshot:
+        use_force = self.force if force is None else force
+        secret_key = self.creds.secret_key if self.creds else None
+        secret_id = self.creds.secret_id if self.creds else None
+        try:
+            snapshot = collect(
+                self.bundle, month, self.cache, force=use_force, creds=self.creds
+            )
+        except Exception as exc:  # noqa: BLE001 — 鉴权/网络错误展示在本机 UI
+            self.last_collect_error = classify_collect_error(
+                sanitize_error_text(str(exc), secret_key=secret_key, secret_id=secret_id)
+            )
+            return _empty_snapshot(month, mock=self.mock)
+        self._note_collect_outcome(snapshot, secret_key=secret_key, secret_id=secret_id)
+        return snapshot
+
+    def _note_collect_outcome(
+        self,
+        snapshot: CollectSnapshot,
+        *,
+        secret_key: str | None,
+        secret_id: str | None,
+    ) -> None:
+        if self.mock:
+            self.last_collect_error = None
+            self.last_collect_warning = None
+            return
+        notes = " ".join(snapshot.notes or [])
+        compact = notes.lower().replace(" ", "")
+        if snapshot.bill_summary is None and not snapshot.buckets:
+            self.last_collect_error = classify_collect_error(
+                sanitize_error_text(
+                    notes or "拉取失败：桶列表与账单均为空。",
+                    secret_key=secret_key,
+                    secret_id=secret_id,
+                )
+            )
+        elif any(
+            n in compact
+            for n in ("authfailure", "invalidsecret", "signaturedoesnotmatch")
+        ):
+            self.last_collect_error = "鉴权失败：SecretId / SecretKey 不正确。"
+        elif "权限" in notes:
+            self.last_collect_error = classify_collect_error(
+                sanitize_error_text(notes, secret_key=secret_key, secret_id=secret_id)
+            )
+        else:
+            self.last_collect_error = None
+        if snapshot.bill_summary is not None and snapshot.bill_summary.ready != 1:
+            self.last_collect_warning = "账单 Ready=0，当前为暂估。"
+        else:
+            self.last_collect_warning = None
 
     def account(
         self,
@@ -57,9 +221,7 @@ class DashboardService:
         q: str | None = None,
     ) -> dict[str, Any]:
         month = parse_month(month) if month else self.default_month()
-        snapshot = collect(
-            self.bundle, month, self.cache, force=self.force, creds=self.creds
-        )
+        snapshot = self._snapshot(month)
         engine, lights = _engines(snapshot)
         ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         regions = sorted({r.region for r in ranking.rows if r.region})
@@ -70,7 +232,7 @@ class DashboardService:
             "page": "account",
             "month": month,
             "account_key": snapshot.account_key,
-            "mock": snapshot.mock,
+            "mock": self.mock,
             "ready": ranking.ready,
             "estimated": ranking.estimated,
             "ready_label": ready_label(ranking.ready, ranking.estimated),
@@ -93,13 +255,12 @@ class DashboardService:
                 "bill": snapshot.bill_summary is not None or bool(snapshot.bill_resources),
                 "monitor": snapshot.monitor is not None,
             },
+            "settings": self.settings_status(),
         }
 
     def bucket(self, bucket: str, month: str | None = None) -> dict[str, Any]:
         month = parse_month(month) if month else self.default_month()
-        snapshot = collect(
-            self.bundle, month, self.cache, force=self.force, creds=self.creds
-        )
+        snapshot = self._snapshot(month)
         engine, lights = _engines(snapshot)
         ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         row = next((r for r in ranking.rows if r.bucket == bucket), None)
@@ -122,7 +283,7 @@ class DashboardService:
         return {
             "page": "bucket",
             "month": month,
-            "mock": snapshot.mock,
+            "mock": self.mock,
             "ready": ranking.ready,
             "estimated": ranking.estimated,
             "ready_label": ready_label(ranking.ready, ranking.estimated),
@@ -156,10 +317,24 @@ class DashboardService:
         series = {key: [] for key in CATEGORY_LABELS}
         payable: list[float | None] = []
         present = 0
+        if self.last_collect_error and not self.mock:
+            return {
+                "months": months,
+                "payable": [None] * len(months),
+                "stacks": [
+                    {
+                        "key": key,
+                        "label": CATEGORY_LABELS[key],
+                        "color": CATEGORY_COLORS[key],
+                        "values": [None] * len(months),
+                    }
+                    for key in CATEGORY_LABELS
+                ],
+                "present": 0,
+                "note": self.last_collect_error,
+            }
         for item in months:
-            snap = collect(
-                self.bundle, item, self.cache, force=self.force, creds=self.creds
-            )
+            snap = self._snapshot(item)
             composed = _month_composition(snap, self.fixture if self.mock else {}, item)
             total = None
             if snap.bill_summary and snap.bill_summary.cos_real_total_cost is not None:
@@ -195,9 +370,7 @@ class DashboardService:
         from cos_cost.ext.export import build_report_payload
 
         month = parse_month(month) if month else self.default_month()
-        snapshot = collect(
-            self.bundle, month, self.cache, force=self.force, creds=self.creds
-        )
+        snapshot = self._snapshot(month)
         engine, lights = _engines(snapshot)
         ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         account = self.account(month)
@@ -219,9 +392,7 @@ class DashboardService:
         from cos_cost.ext.chat import answer_question
 
         month = parse_month(month) if month else self.default_month()
-        snapshot = collect(
-            self.bundle, month, self.cache, force=self.force, creds=self.creds
-        )
+        snapshot = self._snapshot(month)
         engine, lights = _engines(snapshot)
         ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         return answer_question(
@@ -231,6 +402,23 @@ class DashboardService:
 
 def _engines(snapshot: CollectSnapshot) -> tuple[RuleEngine, SnapshotConfigLights]:
     return RuleEngine(snapshot), SnapshotConfigLights(snapshot)
+
+
+def _empty_snapshot(month: str, *, mock: bool) -> CollectSnapshot:
+    return CollectSnapshot(
+        account_key="unknown",
+        month=month,
+        buckets=[],
+        bill_summary=None,
+        prev_bill_summary=None,
+        yoy_bill_summary=None,
+        bill_resources=[],
+        prev_bill_resources=[],
+        monitor=None,
+        notes=[],
+        collected_at=datetime.now(timezone.utc).isoformat(),
+        mock=mock,
+    )
 
 
 def _filter_rows(

@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from cos_cost.formatters import money_text
 from cos_cost.monthutil import previous_month_utc8
+from cos_cost.secrets import classify_collect_error, sanitize_error_text
 from cos_cost.web.service import DashboardService
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -78,7 +79,13 @@ def create_app(service: DashboardService) -> FastAPI:
 
     @app.get("/api/health")
     def api_health() -> dict:
-        return {"ok": True, "mock": service.mock, "default_month": previous_month_utc8()}
+        status = service.settings_status()
+        return {
+            "ok": True,
+            "mock": service.mock,
+            "mode": status["mode"],
+            "default_month": previous_month_utc8(),
+        }
 
     @app.get("/export/pdf")
     def export_pdf(month: str | None = Query(default=None)) -> Response:
@@ -116,5 +123,41 @@ def create_app(service: DashboardService) -> FastAPI:
             raise HTTPException(status_code=400, detail="缺少 q")
         month = body.get("month")
         return service.ask(question, month if isinstance(month, str) else None)
+
+    @app.get("/api/settings/status")
+    def api_settings_status() -> dict:
+        return service.settings_status()
+
+    @app.post("/api/settings/credentials")
+    async def api_settings_credentials(request: Request) -> dict:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="需要 JSON {secret_id, secret_key}")
+        secret_id = str(body.get("secret_id") or "")
+        secret_key = str(body.get("secret_key") or "")
+        try:
+            return service.save_credentials(
+                secret_id=secret_id,
+                secret_key=secret_key,
+                token=str(body.get("token") or "") or None,
+                month=str(body.get("month") or "") or None,
+                model_api_key=str(body.get("model_api_key") or "") or None,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=sanitize_error_text(str(exc), secret_key=secret_key, secret_id=secret_id),
+            ) from exc
+        except Exception as exc:  # pragma: no cover — unexpected collect crash
+            raise HTTPException(
+                status_code=400,
+                detail=classify_collect_error(
+                    sanitize_error_text(str(exc), secret_key=secret_key, secret_id=secret_id)
+                ),
+            ) from exc
+
+    @app.post("/api/settings/mock")
+    def api_settings_mock() -> dict:
+        return service.use_mock()
 
     return app

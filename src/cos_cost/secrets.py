@@ -64,6 +64,48 @@ def redact_secret_id(secret_id: str) -> str:
     return f"{secret_id[:4]}…{secret_id[-2:]}"
 
 
+def mask_secret_id(secret_id: str | None) -> str | None:
+    """页面展示：AKID****abcd，永不回传全文。"""
+    text = (secret_id or "").strip()
+    if not text:
+        return None
+    if len(text) <= 8:
+        return "****"
+    return f"{text[:4]}****{text[-4:]}"
+
+
+def sanitize_error_text(message: str, *, secret_key: str | None = None, secret_id: str | None = None) -> str:
+    text = str(message or "")
+    if secret_key:
+        text = text.replace(secret_key, "***")
+    if secret_id and len(secret_id) > 8:
+        text = text.replace(secret_id, mask_secret_id(secret_id) or "****")
+    return text
+
+
+def classify_collect_error(message: str) -> str:
+    blob = (message or "").lower()
+    compact = blob.replace(" ", "")
+    if any(
+        n in compact
+        for n in (
+            "authfailure",
+            "invalidsecretid",
+            "signaturedoesnotmatch",
+            "secretidnotfound",
+        )
+    ):
+        return "鉴权失败：SecretId / SecretKey 不正确。"
+    if any(
+        n in compact
+        for n in ("unauthorized", "accessdenied", "cam", "forbidden", "permissiondenied")
+    ):
+        return "缺少 CAM 权限。请用只读子用户并粘贴 docs/cam-m1.json；不要授予 GetBucket（列对象）。"
+    if "ready=0" in compact or "暂估" in message:
+        return "账单 Ready=0，当前为暂估。"
+    return sanitize_error_text(message)[:400] or "拉取失败。"
+
+
 def looks_like_secret_key_name(name: str) -> bool:
     return bool(_SECRET_NAME_RE.search(name))
 

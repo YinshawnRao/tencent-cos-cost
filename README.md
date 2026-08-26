@@ -31,7 +31,27 @@ pip install -e ".[dev]"
 
 需要 Python 3.11+。
 
-## M3：Mock 看板 + 导出 + 问答（无密钥）
+## 本机测试（网页填 AK/SK，不用 CLI / .env）
+
+**仅限本机。不要把 `serve` 暴露到公网。**
+
+```bash
+python -m cos_cost serve --mock --port 18765
+```
+
+浏览器打开 <http://127.0.0.1:18765/> → 右上角 **密钥**（mock 时面板默认打开）→ 粘贴只读子用户 SecretId / SecretKey（可选 COS_TOKEN、账期）→ **保存并拉取**。服务端会 collect，然后刷新排行。
+
+- 密钥存在 **内存** 与 gitignore 的 **`.local-creds.json`**（chmod 600）。
+- **不会** 写入 `cache/` JSON、HTML、日志、PDF/Excel。页面只显示掩码 SecretId（`AKID****abcd`）和「已保存」。
+- **改用 mock 数据** / **清除密钥**：清掉本地密钥，回到 fixture。
+- 之后 `python -m cos_cost serve`（可不加 `--mock`）会读 `.local-creds.json`，刷新浏览器不必再贴密钥。
+- `--mock` 仍可无密钥启动；保存并拉取会把**正在运行的服务**切到 live（内存覆盖）。
+
+CAM：子用户只读，粘贴 [docs/cam-m1.json](docs/cam-m1.json)。**不要**授予 `name/cos:GetBucket`。
+
+问答仍是模板，模型 API Key 字段会存盘但 **M3 未使用**。
+
+### Mock 看板 + 导出 + 问答（无密钥）
 
 ```bash
 python -m cos_cost serve --mock --port 18765
@@ -86,7 +106,9 @@ python -m cos_cost rank --mock --month 2026-07 --json
 python -m cos_cost collect --mock --month 2026-07
 ```
 
-## 线上模式（子用户只读 + 缓存）
+## 线上模式（.env 仍可用，不是必填）
+
+本地测试请优先走上面的网页填钥。若仍想用环境变量：
 
 1. 按下方 CAM 创建只读子用户，写入 `.env`（gitignore）：
 
@@ -150,6 +172,9 @@ python -m cos_cost serve --cache-dir ./cache --port 18765
 | `/api/account` | 账号 JSON |
 | `/api/buckets/{bucket}` | 桶 JSON |
 | `/api/ask` | `POST {q, month}` → `{answer, numbers[], links[]}` |
+| `/api/settings/status` | `{mode, secret_id_masked, month, last_collect_error?}` |
+| `/api/settings/credentials` | `POST {secret_id, secret_key, token?, month?}` 保存并 collect |
+| `/api/settings/mock` | 清除密钥，回到 mock fixture |
 | `/export/pdf` `/export/xlsx` | 下载报表 |
 
 ## 缓存
@@ -162,7 +187,7 @@ python -m cos_cost serve --cache-dir ./cache --port 18765
 pytest
 ```
 
-全部 mock / MagicMock，不需要真实 AK/SK。覆盖：各规则在 fixture 上命中、PDF/xlsx 存在、按桶合计对账 186420、问答返回 mock KPI、源码不含 GetBucket / 写接口。
+全部 mock / MagicMock，不需要真实 AK/SK。覆盖：各规则在 fixture 上命中、PDF/xlsx 存在、按桶合计对账 186420、问答返回 mock KPI、源码不含 GetBucket / 写接口、本机密钥 API 不回传 SecretKey、`.local-creds.json` 被 gitignore。
 
 ## 给后续阶段
 

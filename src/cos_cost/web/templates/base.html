@@ -10,7 +10,7 @@
   <header class="topbar">
     <div class="brand">
       <a href="/?month={{ payload.month }}">COS 机会大师</a>
-      {% if payload.mock %}<span class="pill mock">mock</span>{% endif %}
+{% if payload.mock %}<span class="pill mock">mock</span>{% else %}<span class="pill live">live</span>{% endif %}
     </div>
     <nav class="crumb">{% block crumb %}账号全局{% endblock %}</nav>
     <div class="top-actions">{% block actions %}{% endblock %}</div>

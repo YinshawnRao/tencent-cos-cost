@@ -2,6 +2,7 @@
 {% block title %}账号全局 · COS 机会大师{% endblock %}
 {% block crumb %}<span>账号全局</span>{% endblock %}
 {% block actions %}
+  <button class="btn ghost" type="button" id="open-settings">密钥</button>
   <button class="btn ghost" type="button" data-export="pdf">导出 PDF</button>
   <button class="btn ghost" type="button" data-export="xlsx">导出 Excel</button>
 {% endblock %}
@@ -25,6 +26,47 @@
 </form>
 
 <div class="banner {% if payload.estimated %}warn{% endif %}">{{ payload.banner }}</div>
+{% if payload.settings and payload.settings.last_collect_error %}
+<div class="banner warn" id="collect-error">{{ payload.settings.last_collect_error }}</div>
+{% endif %}
+{% if payload.settings and payload.settings.last_collect_warning %}
+<div class="banner warn">{{ payload.settings.last_collect_warning }}</div>
+{% endif %}
+
+<aside id="settings-panel" class="settings-panel" hidden>
+  <div class="settings-inner">
+    <header>
+      <h2>本机密钥</h2>
+      <button class="close" type="button" id="close-settings">关闭</button>
+    </header>
+    <p class="hint">仅限本机测试，不要把 serve 暴露到公网。请用只读子用户（<code>docs/cam-m1.json</code>），不要授予 GetBucket（列对象）。密钥保存在内存与 gitignore 的 <code>.local-creds.json</code>（chmod 600），不会写入 cache / HTML / 导出。</p>
+    <p class="saved-line" id="settings-saved" hidden></p>
+    <form id="settings-form">
+      <label>SecretId
+        <input type="text" name="secret_id" id="settings-secret-id" autocomplete="off" spellcheck="false" placeholder="AKIDxxxxxxxx">
+      </label>
+      <label>SecretKey
+        <input type="password" name="secret_key" id="settings-secret-key" autocomplete="new-password" placeholder="不会回显">
+      </label>
+      <label>COS_TOKEN（可选，临时密钥）
+        <input type="password" name="token" id="settings-token" autocomplete="new-password">
+      </label>
+      <label>账期
+        <input type="month" name="month" id="settings-month" value="{{ payload.month }}">
+      </label>
+      <label>模型 API Key（未使用，问答仍走模板）
+        <input type="password" name="model_api_key" id="settings-model-key" autocomplete="new-password" placeholder="预留，当前不用">
+      </label>
+      <p class="settings-progress" id="settings-progress" hidden>正在拉取账单 / 监控 / 配置…</p>
+      <p class="settings-error" id="settings-error" hidden></p>
+      <div class="settings-actions">
+        <button class="btn" type="submit">保存并拉取</button>
+        <button class="btn ghost dark" type="button" id="settings-mock">改用 mock 数据</button>
+        <button class="btn ghost dark" type="button" id="settings-clear">清除密钥</button>
+      </div>
+    </form>
+  </div>
+</aside>
 
 <section class="ask-bar">
   <form id="ask-form">
