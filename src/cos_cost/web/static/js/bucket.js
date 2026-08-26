@@ -27,6 +27,13 @@
     const card = cards[index];
     if (!card || !drawer) return;
     document.getElementById("drawer-title").textContent = `${card.rule_id} · ${card.title}`;
+    const netEl = document.getElementById("drawer-net");
+    if (netEl) {
+      const net = card.net_saving == null ? "—" : `¥ ${Number(card.net_saving).toLocaleString()}`;
+      netEl.textContent = `${net} · 置信度 ${card.confidence}`;
+    }
+    const whyEl = document.getElementById("drawer-why");
+    if (whyEl) whyEl.textContent = card.why || "";
     document.getElementById("drawer-evidence").textContent = JSON.stringify(card.evidence || {}, null, 2);
     document.getElementById("drawer-formula").textContent = card.formula || "";
     document.getElementById("drawer-action").textContent = card.action || "";
@@ -49,6 +56,18 @@
         COSUI.toast("已复制草稿，不会应用到桶。");
       } catch (err) {
         COSUI.toast("复制失败，请手动选择草稿文本。");
+      }
+    });
+  }
+  const copyAll = document.getElementById("copy-all-drafts");
+  if (copyAll) {
+    copyAll.addEventListener("click", async () => {
+      const text = (cards[0] && cards[0].action_draft) || "";
+      try {
+        await navigator.clipboard.writeText(text);
+        COSUI.toast("已复制草稿，不会应用到桶。");
+      } catch (err) {
+        COSUI.toast("复制失败，请打开机会抽屉手动复制。");
       }
     });
   }

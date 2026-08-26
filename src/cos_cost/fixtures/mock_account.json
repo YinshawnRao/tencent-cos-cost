@@ -28,6 +28,69 @@
       "CreationDate": "2025-12-01T00:00:00.000Z"
     }
   ],
+  "bucket_config": {
+    "logs-prod-1250000000": {
+      "versioning": "Suspended",
+      "lifecycle": {},
+      "inventory": [
+        {
+          "Id": "weekly-csv",
+          "IsEnabled": "true",
+          "Destination": {
+            "COSBucketDestination": {
+              "Bucket": "qcs::cos:ap-guangzhou::inv-archive-1250000000",
+              "Format": "CSV",
+              "Prefix": "inv/"
+            }
+          }
+        }
+      ]
+    },
+    "img-cdn-1250000000": {
+      "versioning": "Suspended",
+      "lifecycle": {},
+      "logging": {
+        "LoggingEnabled": {
+          "TargetBucket": "log-access-1250000000",
+          "TargetPrefix": "cdn/"
+        }
+      }
+    },
+    "backup-1250000000": {
+      "versioning": "Suspended",
+      "lifecycle": {
+        "Rule": [
+          {
+            "ID": "backup-abort-and-ia",
+            "Status": "Enabled",
+            "Filter": {"Prefix": ""},
+            "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7},
+            "Transition": {"Days": 30, "StorageClass": "STANDARD_IA"}
+          }
+        ]
+      }
+    },
+    "archive-cold-1250000000": {
+      "versioning": "Enabled",
+      "lifecycle": {}
+    },
+    "tmp-scratch-1250000000": {
+      "versioning": "Enabled",
+      "lifecycle": {
+        "Rule": [
+          {
+            "ID": "too-short-ia-archive",
+            "Status": "Enabled",
+            "Filter": {"Prefix": ""},
+            "Transition": [
+              {"Days": 7, "StorageClass": "STANDARD_IA"},
+              {"Days": 20, "StorageClass": "ARCHIVE"}
+            ]
+          }
+        ]
+      }
+    }
+  },
   "months": {
     "2026-07": {
       "ready": 1,
@@ -263,7 +326,7 @@
         "4xxResponse": {
           "logs-prod-1250000000": 2100000,
           "img-cdn-1250000000": 5400000,
-          "tmp-scratch-1250000000": 1100000
+          "tmp-scratch-1250000000": 1600000
         },
         "5xxResponse": {
           "logs-prod-1250000000": 180000,

@@ -137,3 +137,23 @@ def test_live_cos_list_buckets_only() -> None:
     fake_s3.list_objects.assert_not_called()
     fake_s3.get_bucket.assert_not_called()
     assert not hasattr(fake_s3, "put_bucket") or True
+
+
+def test_live_cos_lifecycle_is_readonly() -> None:
+    fake_s3 = MagicMock()
+    fake_s3.get_bucket_lifecycle.return_value = {
+        "Rule": [{"ID": "a", "Status": "Enabled", "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}}]
+    }
+    with (
+        patch("qcloud_cos.CosConfig"),
+        patch("qcloud_cos.CosS3Client", return_value=fake_s3),
+    ):
+        from cos_cost.clients.live_cos import LiveCosClient
+        from cos_cost.secrets import Credentials
+
+        client = LiveCosClient(Credentials("id", "key"))
+        client._client = fake_s3
+        payload = client.get_bucket_lifecycle("logs-prod-1250000000", "ap-guangzhou")
+    assert payload["Rule"][0]["ID"] == "a"
+    fake_s3.list_objects.assert_not_called()
+    fake_s3.put_bucket_lifecycle.assert_not_called()

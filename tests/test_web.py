@@ -58,3 +58,26 @@ def test_api_bucket_and_ready_zero(cache_dir) -> None:
 def test_missing_bucket_404(cache_dir) -> None:
     client = _client(cache_dir)
     assert client.get("/b/no-such-bucket-1250000000", params={"month": "2026-07"}).status_code == 404
+
+
+def test_account_uses_engine_cards_not_static_only(cache_dir) -> None:
+    client = _client(cache_dir)
+    data = client.get("/api/account", params={"month": "2026-07"}).json()
+    cards = [c for col in data["opportunities"]["columns"] for c in col["cards"]]
+    ids = {c["rule_id"] for c in cards}
+    assert {"R01", "R02", "R03", "R11"}.issubset(ids)
+    assert data["kpis"]["cos_payable"] == 186420.0
+    assert data["kpis"]["optimizable"] is not None
+    logs = next(r for r in data["ranking"] if r["bucket"] == "logs-prod-1250000000")
+    assert logs["opportunity_text"] != "—"
+
+
+def test_export_endpoints(cache_dir) -> None:
+    client = _client(cache_dir)
+    pdf = client.get("/export/pdf", params={"month": "2026-07"})
+    assert pdf.status_code == 200
+    assert pdf.content[:4] == b"%PDF"
+    assert "secret" not in pdf.text.lower()
+    xlsx = client.get("/export/xlsx", params={"month": "2026-07"})
+    assert xlsx.status_code == 200
+    assert xlsx.content[:2] == b"PK"

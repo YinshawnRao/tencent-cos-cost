@@ -13,6 +13,7 @@ from cos_cost.secrets import SecretLeakError, assert_no_secrets
 BUCKET_LIST_TTL = timedelta(hours=1)
 MONITOR_TTL = timedelta(minutes=30)
 ESTIMATED_BILL_TTL = timedelta(hours=1)
+CONFIG_TTL = timedelta(hours=1)
 
 
 def utcnow() -> datetime:

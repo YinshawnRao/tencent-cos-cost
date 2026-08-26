@@ -14,12 +14,19 @@ function toast(text) {
   }, 2400);
 }
 
-function bindM3Buttons() {
-  document.querySelectorAll("[data-m3=export]").forEach((btn) => {
+function bindExportButtons(month) {
+  document.querySelectorAll("[data-export]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      toast("导出 / 应用到桶属于 M3，本阶段未实现。");
+      const kind = btn.getAttribute("data-export");
+      const stamp = month || "";
+      window.location.href = `/export/${kind}?month=${encodeURIComponent(stamp)}`;
     });
   });
+}
+
+function bindM3Buttons() {
+  const data = readBootstrap();
+  bindExportButtons(data && data.month);
 }
 
 function emptyChart(dom, message) {
@@ -190,6 +197,7 @@ window.COSUI = {
   readBootstrap,
   toast,
   bindM3Buttons,
+  bindExportButtons,
   renderC1,
   renderC2,
   renderC3,

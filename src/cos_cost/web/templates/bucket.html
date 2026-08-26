@@ -6,8 +6,8 @@
   <span>{{ payload.bucket }}</span>
 {% endblock %}
 {% block actions %}
-  <button class="btn ghost" type="button" data-m3="export">复制规则草稿</button>
-  <button class="btn ghost" type="button" data-m3="export">导出本桶</button>
+  <button class="btn ghost" type="button" id="copy-all-drafts">复制规则草稿</button>
+  <button class="btn ghost" type="button" data-export="xlsx">导出本桶</button>
 {% endblock %}
 {% block body %}
 <form class="filters" method="get" action="/b/{{ payload.bucket }}">
@@ -100,7 +100,7 @@
         <span>置信度 {{ card.confidence }}</span></p>
     </article>
     {% endfor %}
-    {% if not payload.opportunities %}<p class="hint">本桶暂无占位机会卡。</p>{% endif %}
+    {% if not payload.opportunities %}<p class="hint">本桶暂无规则命中。</p>{% endif %}
   </div>
 </section>
 
@@ -108,6 +108,9 @@
   <div class="drawer-inner">
     <button class="close" type="button" id="drawer-close">关闭</button>
     <h2 id="drawer-title"></h2>
+    <p class="save" id="drawer-net"></p>
+    <h3>原因</h3>
+    <p id="drawer-why"></p>
     <h3>证据</h3>
     <pre id="drawer-evidence"></pre>
     <h3>公式</h3>

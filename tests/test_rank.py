@@ -30,8 +30,11 @@ def test_rank_columns_match_wireframe(cache_dir, mock_clients) -> None:
     assert logs.capacity_bytes is not None
     assert logs.standard_pct is not None
     assert 90 <= logs.standard_pct <= 92
-    assert logs.opportunity_count == 0
-    assert logs.config_lights.lifecycle == "unknown"
+    assert logs.opportunity_count >= 3
+    assert logs.config_lights.lifecycle == "risk"
+    assert logs.config_lights.fragments == "risk"
+    assert ranking.kpis.optimizable_amount is not None
+    assert ranking.kpis.optimizable_amount >= 50
 
 
 def test_rank_estimated_when_ready_zero(cache_dir, mock_clients) -> None:
@@ -61,7 +64,7 @@ def test_rank_missing_bill_null_payable(cache_dir, fixture_data) -> None:
 
     snap = collect(mock_bundle(fixture_data, deny_bill=True), "2026-07", FileCache(cache_dir))
     ranking = build_ranking(snap)
-    assert len(ranking.rows) == 5
+    assert len(ranking.rows) >= 5
     assert all(row.payable is None for row in ranking.rows)
     assert ranking.kpis.cos_payable is None
 

@@ -47,10 +47,10 @@ def ranking_table(result: RankingResult) -> str:
         "KPI",
         f"  COS 应付          {_money(k.cos_payable)}"
         f"    环比 {_pct(k.mom_pct)}    同比 {_pct(k.yoy_pct)}",
-        f"  可优化金额        {_money(k.optimizable_amount)}（M3 规则引擎未接入）",
+        f"  可优化金额        {_money(k.optimizable_amount)}（net≥50，规则引擎）",
         f"  标准存储占比      {_pct(k.standard_storage_pct, signed=False)}",
         f"  外网下行          {_volume(k.internet_traffic_bytes)}",
-        f"  请求费            {_money(k.request_fee)}（M1 未拆分计费项）",
+        f"  请求费            {_money(k.request_fee)}",
         f"  数据就绪          {ready_label} · 桶 {k.bucket_with_bill}/{k.bucket_listed}",
     ]
 

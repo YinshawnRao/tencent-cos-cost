@@ -2,8 +2,8 @@
 {% block title %}账号全局 · COS 机会大师{% endblock %}
 {% block crumb %}<span>账号全局</span>{% endblock %}
 {% block actions %}
-  <button class="btn ghost" type="button" data-m3="export">导出 PDF</button>
-  <button class="btn ghost" type="button" data-m3="export">导出 Excel</button>
+  <button class="btn ghost" type="button" data-export="pdf">导出 PDF</button>
+  <button class="btn ghost" type="button" data-export="xlsx">导出 Excel</button>
 {% endblock %}
 {% block body %}
 <form class="filters" method="get" action="/">
@@ -26,6 +26,16 @@
 
 <div class="banner {% if payload.estimated %}warn{% endif %}">{{ payload.banner }}</div>
 
+<section class="ask-bar">
+  <form id="ask-form">
+    <label>问答
+      <input type="search" id="ask-q" name="q" placeholder="这个月为什么贵 / logs-prod 怎么省 / 导出上月一页">
+    </label>
+    <button class="btn" type="submit">提问</button>
+  </form>
+  <div id="ask-answer" hidden></div>
+</section>
+
 <section class="kpis">
   <article class="card kpi">
     <h3>COS 应付</h3>
@@ -35,7 +45,7 @@
   <article class="card kpi">
     <h3>可优化金额</h3>
     <p class="num">{{ payload.kpis.optimizable_text }}{% if payload.kpis.optimizable %}<span class="unit">/月</span>{% endif %}</p>
-    <p class="sub">net ≥ 阈值 · 规则引擎占位</p>
+    <p class="sub">net ≥ 50 元/月 · 规则引擎</p>
   </article>
   <article class="card kpi">
     <h3>标准存储占比</h3>
@@ -127,20 +137,21 @@
 </section>
 
 <section class="opp-board">
-  <header class="section-head"><h2>机会榜</h2><span class="muted">占位卡 · 规则引擎为 M3</span></header>
+  <header class="section-head"><h2>机会榜</h2><span class="muted">规则引擎 · 本月可回收 / 下月起稳态 / 需业务改造</span></header>
   <div class="opp-cols">
     {% for col in payload.opportunities.columns %}
     <div>
       <h3>{{ col.label }}</h3>
       {% for card in col.cards %}
-      <article class="card opp" data-rule="{{ card.rule_id }}">
+      <article class="card opp clickable" data-rule="{{ card.rule_id }}" data-href="/b/{{ card.bucket }}?month={{ payload.month }}">
         <p class="rid">{{ card.rule_id }} · {{ card.title }}</p>
         <p class="bucket">{{ card.bucket }}</p>
+        <p class="why">{{ card.why or card.formula }}</p>
         <p class="save">{% if card.net_saving %}¥ {{ "{:,.0f}".format(card.net_saving) }}{% else %}—{% endif %}
           <span>置信度 {{ card.confidence }}</span></p>
       </article>
       {% endfor %}
-      {% if not col.cards %}<p class="hint">暂无占位卡</p>{% endif %}
+      {% if not col.cards %}<p class="hint">暂无规则命中</p>{% endif %}
     </div>
     {% endfor %}
   </div>

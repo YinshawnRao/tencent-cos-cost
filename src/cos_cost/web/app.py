@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -79,5 +79,42 @@ def create_app(service: DashboardService) -> FastAPI:
     @app.get("/api/health")
     def api_health() -> dict:
         return {"ok": True, "mock": service.mock, "default_month": previous_month_utc8()}
+
+    @app.get("/export/pdf")
+    def export_pdf(month: str | None = Query(default=None)) -> Response:
+        from cos_cost.ext.export import render_pdf
+
+        payload = service.report_payload(month)
+        data = render_pdf(payload)
+        stamp = payload.get("month") or "report"
+        return Response(
+            content=data,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="cos-cost-{stamp}.pdf"'},
+        )
+
+    @app.get("/export/xlsx")
+    def export_xlsx(month: str | None = Query(default=None)) -> Response:
+        from cos_cost.ext.export import render_xlsx
+
+        payload = service.report_payload(month)
+        data = render_xlsx(payload)
+        stamp = payload.get("month") or "report"
+        return Response(
+            content=data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="cos-cost-{stamp}.xlsx"'},
+        )
+
+    @app.post("/api/ask")
+    async def api_ask(request: Request) -> dict:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="需要 JSON {q, month}")
+        question = str(body.get("q") or body.get("question") or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="缺少 q")
+        month = body.get("month")
+        return service.ask(question, month if isinstance(month, str) else None)
 
     return app

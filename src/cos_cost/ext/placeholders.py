@@ -1,4 +1,4 @@
-"""M2 占位：机会卡与配置体检。不是规则引擎，mock 用 fixture 喂布局。"""
+"""布局对照用占位。真实 mock / 线上路径必须走 RuleEngine，不得只喂静态机会卡。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def load_placeholders(path: Path | None = None) -> dict[str, Any]:
 
 
 class PlaceholderOpportunityEngine:
-    """读取 fixture 机会卡；M3 再换成真实规则引擎。"""
+    """仅供对照线框；Dashboard / CLI 已改用 RuleEngine。"""
 
     def __init__(self, payload: dict[str, Any] | None = None) -> None:
         data = payload if payload is not None else load_placeholders()

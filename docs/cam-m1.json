@@ -13,7 +13,12 @@
     {
       "effect": "allow",
       "action": [
-        "name/cos:HeadBucket"
+        "name/cos:HeadBucket",
+        "name/cos:GetBucketLifecycle",
+        "name/cos:GetBucketVersioning",
+        "name/cos:GetBucketLogging",
+        "name/cos:GetBucketInventory",
+        "name/cos:ListBucketInventoryConfigurations"
       ],
       "resource": [
         "qcs::cos:*:uid/${appid}:*/*",

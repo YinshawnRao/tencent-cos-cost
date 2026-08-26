@@ -18,13 +18,9 @@ from cos_cost.clients.factory import build_bundle
 from cos_cost.clients.mock import load_fixture
 from cos_cost.clients.protocols import ClientBundle
 from cos_cost.collect import collect
-from cos_cost.ext.config_lights import UnknownConfigLights
-from cos_cost.ext.opportunity import NullOpportunityEngine
-from cos_cost.ext.placeholders import (
-    COLUMN_LABELS,
-    PlaceholderConfigLights,
-    PlaceholderOpportunityEngine,
-)
+from cos_cost.ext.config_lights import SnapshotConfigLights
+from cos_cost.ext.opportunity import RuleEngine
+from cos_cost.ext.placeholders import COLUMN_LABELS
 from cos_cost.formatters import money_text, pct_text, ready_label, volume_text
 from cos_cost.models import CollectSnapshot, RankingResult, RankingRow
 from cos_cost.monthutil import parse_month, previous_month_utc8, shift_month
@@ -49,12 +45,6 @@ class DashboardService:
         self.force = force
         self.bundle: ClientBundle = build_bundle(mock=mock, creds=creds)
         self.fixture = load_fixture() if mock else {}
-        if mock:
-            self.opportunity = PlaceholderOpportunityEngine()
-            self.lights = PlaceholderConfigLights()
-        else:
-            self.opportunity = NullOpportunityEngine()
-            self.lights = UnknownConfigLights()
 
     def default_month(self) -> str:
         return previous_month_utc8()
@@ -70,9 +60,8 @@ class DashboardService:
         snapshot = collect(
             self.bundle, month, self.cache, force=self.force, creds=self.creds
         )
-        ranking = build_ranking(
-            snapshot, opportunity=self.opportunity, lights=self.lights
-        )
+        engine, lights = _engines(snapshot)
+        ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         regions = sorted({r.region for r in ranking.rows if r.region})
         rows = _filter_rows(ranking.rows, region=region, q=q)
         filtered = bool(region or q)
@@ -98,7 +87,7 @@ class DashboardService:
             "composition": _composition(snapshot, self.fixture if self.mock else {}),
             "storage_classes": _storage_classes(snapshot),
             "ranking": [_row_dict(r) for r in rows[:20]],
-            "opportunities": _group_opportunities(self.opportunity.list_all() if hasattr(self.opportunity, "list_all") else []),
+            "opportunities": _group_opportunities(engine.list_all()),
             "notes": ranking.notes,
             "permission": {
                 "bill": snapshot.bill_summary is not None or bool(snapshot.bill_resources),
@@ -111,26 +100,20 @@ class DashboardService:
         snapshot = collect(
             self.bundle, month, self.cache, force=self.force, creds=self.creds
         )
-        ranking = build_ranking(
-            snapshot, opportunity=self.opportunity, lights=self.lights
-        )
+        engine, lights = _engines(snapshot)
+        ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         row = next((r for r in ranking.rows if r.bucket == bucket), None)
         meta = next((b for b in snapshot.buckets if b.name == bucket), None)
-        if row is None and meta is None:
+        extra = None
+        if snapshot.config:
+            extra = next((b for b in snapshot.config.extra_buckets if b.name == bucket), None)
+        if row is None and meta is None and extra is None:
             return {"error": "bucket_not_found", "bucket": bucket, "month": month}
         metrics = None
         if snapshot.monitor:
             metrics = snapshot.monitor.by_bucket.get(bucket)
-        cards = (
-            self.opportunity.cards_for(bucket)
-            if hasattr(self.opportunity, "cards_for")
-            else []
-        )
-        health = (
-            self.lights.health_for(bucket)
-            if hasattr(self.lights, "health_for")
-            else []
-        )
+        cards = engine.cards_for(bucket)
+        health = lights.health_for(bucket)
         created = meta.creation_date if meta else None
         az = "单 AZ"
         if metrics and (metrics.maz_std_storage_bytes or 0) > 0:
@@ -208,6 +191,48 @@ class DashboardService:
         }
 
 
+    def report_payload(self, month: str | None = None) -> dict[str, Any]:
+        from cos_cost.ext.export import build_report_payload
+
+        month = parse_month(month) if month else self.default_month()
+        snapshot = collect(
+            self.bundle, month, self.cache, force=self.force, creds=self.creds
+        )
+        engine, lights = _engines(snapshot)
+        ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
+        account = self.account(month)
+        owner = None
+        for row in snapshot.bill_resources:
+            if row.owner_uin:
+                owner = row.owner_uin
+                break
+        return build_report_payload(
+            snapshot,
+            ranking,
+            cards=engine.list_all(),
+            composition={item["key"]: item["value"] for item in account["composition"]["items"]},
+            trend=account.get("trend"),
+            owner_uin=owner,
+        )
+
+    def ask(self, question: str, month: str | None = None) -> dict[str, Any]:
+        from cos_cost.ext.chat import answer_question
+
+        month = parse_month(month) if month else self.default_month()
+        snapshot = collect(
+            self.bundle, month, self.cache, force=self.force, creds=self.creds
+        )
+        engine, lights = _engines(snapshot)
+        ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
+        return answer_question(
+            question, month=month, ranking=ranking, cards=engine.list_all()
+        )
+
+
+def _engines(snapshot: CollectSnapshot) -> tuple[RuleEngine, SnapshotConfigLights]:
+    return RuleEngine(snapshot), SnapshotConfigLights(snapshot)
+
+
 def _filter_rows(
     rows: list[RankingRow], *, region: str | None, q: str | None
 ) -> list[RankingRow]:
@@ -268,7 +293,7 @@ def _account_banner(ranking: RankingResult, snapshot: CollectSnapshot) -> str:
     ready = ready_label(ranking.ready, ranking.estimated)
     listed = ranking.kpis.bucket_listed
     billed = ranking.kpis.bucket_with_bill
-    extra = "金额来自费用中心，可优化来自规则引擎占位（M3 才会算净节省）。"
+    extra = "金额来自费用中心，可优化来自规则引擎净节省（net≥50，不含 R05–R09 / R06 / 备份桶）。"
     if snapshot.bill_summary is None and not snapshot.bill_resources:
         extra = "账单无权限：应付显示为 — / 无权限，桶列表仍可用。"
     elif snapshot.monitor is None:

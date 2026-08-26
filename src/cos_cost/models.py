@@ -122,8 +122,83 @@ class MonitorSnapshot:
 
 
 @dataclass
+class LifecycleTransition:
+    days: int | None = None
+    storage_class: str | None = None
+
+
+@dataclass
+class LifecycleRule:
+    rule_id: str | None = None
+    status: str | None = None
+    prefix: str | None = None
+    abort_days: int | None = None
+    transitions: list[LifecycleTransition] = field(default_factory=list)
+    noncurrent_transitions: list[LifecycleTransition] = field(default_factory=list)
+    noncurrent_expiration_days: int | None = None
+    expiration_days: int | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def enabled(self) -> bool:
+        return (self.status or "Enabled").lower() == "enabled"
+
+
+@dataclass
+class BucketConfig:
+    """只读配置：GetBucketLifecycle / Versioning / Inventory / Logging。"""
+
+    bucket: str
+    region: str | None = None
+    versioning: str | None = None
+    rules: list[LifecycleRule] = field(default_factory=list)
+    inventory_ids: list[str] = field(default_factory=list)
+    inventory_dest_buckets: list[str] = field(default_factory=list)
+    logging_dest_bucket: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+    def has_abort(self) -> bool:
+        return any(rule.abort_days is not None for rule in self.rules if rule.enabled)
+
+    def has_storage_transition(self) -> bool:
+        classes = {
+            "STANDARD_IA",
+            "IA",
+            "ARCHIVE",
+            "DEEP_ARCHIVE",
+            "INTELLIGENT_TIERING",
+        }
+        for rule in self.rules:
+            if not rule.enabled:
+                continue
+            for item in rule.transitions:
+                token = (item.storage_class or "").upper().replace(" ", "_")
+                if token in classes or token.endswith("_IA"):
+                    return True
+        return False
+
+    def has_noncurrent_rule(self) -> bool:
+        for rule in self.rules:
+            if not rule.enabled:
+                continue
+            if rule.noncurrent_expiration_days is not None or rule.noncurrent_transitions:
+                return True
+        return False
+
+    def versioning_enabled(self) -> bool:
+        return (self.versioning or "").lower() == "enabled"
+
+
+@dataclass
+class ConfigSnapshot:
+    by_bucket: dict[str, BucketConfig] = field(default_factory=dict)
+    extra_buckets: list[BucketInfo] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ConfigLights:
-    """配置灯占位（M2 再接 Head/配置只读接口）。unknown = 未探测。"""
+    """配置灯：生命周期 / 碎片 / CDN / 版本 / 备份。unknown = 未探测。"""
 
     lifecycle: str = "unknown"
     fragments: str = "unknown"
@@ -204,6 +279,7 @@ class CollectSnapshot:
     collected_at: str
     mock: bool = False
     cache_hits: list[str] = field(default_factory=list)
+    config: ConfigSnapshot | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _to_plain(self)

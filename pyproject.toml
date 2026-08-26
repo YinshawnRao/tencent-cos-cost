@@ -1,7 +1,7 @@
 [project]
 name = "cos-cost"
-version = "0.2.0"
-description = "腾讯云 COS 成本分析 Agent（M1 CLI + M2 只读看板）"
+version = "0.3.0"
+description = "腾讯云 COS 成本分析 Agent（M1 CLI + M2 看板 + M3 规则引擎/导出/问答）"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "COS Cost Agent" }]
@@ -15,6 +15,8 @@ dependencies = [
     "tencentcloud-sdk-python-common>=3.0.1400",
     "tencentcloud-sdk-python-monitor>=3.0.1400",
     "uvicorn[standard]>=0.32.0",
+    "openpyxl>=3.1.5",
+    "reportlab>=4.2.5",
 ]
 
 [project.optional-dependencies]

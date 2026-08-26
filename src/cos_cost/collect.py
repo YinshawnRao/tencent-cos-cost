@@ -8,15 +8,19 @@ from typing import Any
 
 from cos_cost.cache import (
     BUCKET_LIST_TTL,
+    CONFIG_TTL,
     ESTIMATED_BILL_TTL,
     MONITOR_TTL,
     FileCache,
 )
 from cos_cost.clients.errors import PermissionDeniedError
 from cos_cost.clients.parse import (
+    config_snapshot_to_payload,
     parse_bill_resource,
     parse_buckets,
+    parse_bucket_config,
     parse_cached_bill_summary,
+    parse_cached_config,
 )
 from cos_cost.clients.protocols import ClientBundle
 from cos_cost.models import (
@@ -24,6 +28,7 @@ from cos_cost.models import (
     BillSummary,
     BucketInfo,
     CollectSnapshot,
+    ConfigSnapshot,
     MonitorBucketMetrics,
     MonitorSnapshot,
 )
@@ -94,7 +99,21 @@ def collect(
 
     names = [b.name for b in buckets]
     extra_ids = _resource_ids_not_in_buckets(resources, names)
-    monitor_names = names + extra_ids
+
+    config, cfg_note, cfg_hit = _load_config(
+        bundle,
+        cache,
+        account_key,
+        buckets,
+        force=force,
+        secret_key=secret_key,
+    )
+    if cfg_note:
+        notes.append(cfg_note)
+    if cfg_hit:
+        cache_hits.append("bucket_config")
+
+    monitor_names = list(dict.fromkeys(names + extra_ids + [b.name for b in config.extra_buckets]))
 
     monitor, mon_note, mon_hit = _load_monitor(
         bundle,
@@ -124,6 +143,7 @@ def collect(
         collected_at=datetime.now(timezone.utc).isoformat(),
         mock=bundle.mock,
         cache_hits=cache_hits,
+        config=config,
     )
 
 
@@ -249,6 +269,128 @@ def _load_resources(
         secret_key=secret_key,
     )
     return rows, None, False
+
+
+def _load_config(
+    bundle: ClientBundle,
+    cache: FileCache,
+    account_key: str,
+    buckets: list[BucketInfo],
+    *,
+    force: bool,
+    secret_key: str | None,
+) -> tuple[ConfigSnapshot, str | None, bool]:
+    if not force:
+        hit = cache.get(account_key, "bucket_config", None, ttl=CONFIG_TTL)
+        if hit and isinstance(hit.payload, dict):
+            by_bucket = parse_cached_config(hit.payload)
+            extra = _extra_from_configs(by_bucket, {b.name for b in buckets})
+            return ConfigSnapshot(by_bucket=by_bucket, extra_buckets=extra), None, True
+
+    by_bucket: dict[str, Any] = {}
+    notes: list[str] = []
+    getter_lc = getattr(bundle.cos, "get_bucket_lifecycle", None)
+    getter_ver = getattr(bundle.cos, "get_bucket_versioning", None)
+    getter_log = getattr(bundle.cos, "get_bucket_logging", None)
+    getter_inv = getattr(bundle.cos, "list_bucket_inventory", None)
+    if not callable(getter_lc):
+        snap = ConfigSnapshot(notes=["客户端无 GetBucketLifecycle，配置灯/R02–R10 降级。"])
+        return snap, snap.notes[0], False
+
+    for bucket in buckets:
+        lc: Any = {}
+        ver: Any = {}
+        log: Any = {}
+        inv: Any = []
+        local_notes: list[str] = []
+        try:
+            lc = getter_lc(bucket.name, bucket.region)
+        except PermissionDeniedError as exc:
+            local_notes.append(f"无生命周期权限: {exc}")
+            lc = {}
+        except Exception as exc:  # noqa: BLE001 — 单桶降级，不中断采集
+            local_notes.append(f"生命周期读取失败: {exc}")
+            lc = {}
+        if callable(getter_ver):
+            try:
+                ver = getter_ver(bucket.name, bucket.region)
+            except PermissionDeniedError:
+                local_notes.append("无版本控制读取权限")
+                ver = {}
+            except Exception as exc:  # noqa: BLE001
+                local_notes.append(f"版本控制读取失败: {exc}")
+                ver = {}
+        if callable(getter_log):
+            try:
+                log = getter_log(bucket.name, bucket.region)
+            except PermissionDeniedError:
+                local_notes.append("无日志配置读取权限")
+                log = {}
+            except Exception as exc:  # noqa: BLE001
+                local_notes.append(f"日志配置读取失败: {exc}")
+                log = {}
+        if callable(getter_inv):
+            try:
+                inv = getter_inv(bucket.name, bucket.region)
+            except PermissionDeniedError:
+                local_notes.append("无清单配置读取权限")
+                inv = []
+            except Exception as exc:  # noqa: BLE001
+                local_notes.append(f"清单配置读取失败: {exc}")
+                inv = []
+        if not isinstance(lc, dict):
+            lc = {}
+        if not isinstance(ver, dict):
+            ver = {}
+        if not isinstance(log, dict):
+            log = {}
+        if not isinstance(inv, list):
+            inv = [inv] if isinstance(inv, dict) else []
+        by_bucket[bucket.name] = parse_bucket_config(
+            bucket.name,
+            bucket.region,
+            lifecycle=lc,
+            versioning=ver,
+            logging=log,
+            inventory=inv,
+            notes=local_notes,
+        )
+
+    extra = _extra_from_configs(by_bucket, {b.name for b in buckets})
+    snap = ConfigSnapshot(by_bucket=by_bucket, extra_buckets=extra, notes=notes)
+    cache.put(
+        account_key,
+        "bucket_config",
+        None,
+        config_snapshot_to_payload(by_bucket),
+        secret_key=secret_key,
+    )
+    note = None
+    if extra:
+        names = "、".join(b.name for b in extra)
+        note = f"R12 清单/日志目标桶已纳入账号视图: {names}"
+    return snap, note, False
+
+
+def _extra_from_configs(by_bucket: dict, known: set[str]) -> list[BucketInfo]:
+    extra: list[BucketInfo] = []
+    seen = set(known)
+    for cfg in by_bucket.values():
+        dests = list(cfg.inventory_dest_buckets)
+        if cfg.logging_dest_bucket:
+            dests.append(cfg.logging_dest_bucket)
+        for name in dests:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            extra.append(
+                BucketInfo(
+                    name=name,
+                    region=cfg.region,
+                    raw={"source": "inventory_or_logging", "via": cfg.bucket},
+                )
+            )
+    return extra
 
 
 def _load_monitor(

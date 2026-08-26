@@ -27,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         return _run_serve(args)
+    if args.command == "export":
+        return _run_export(args)
 
     try:
         month = parse_month(args.month) if args.month else previous_month_utc8()
@@ -74,6 +76,55 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _run_export(args: argparse.Namespace) -> int:
+    try:
+        month = parse_month(args.month) if args.month else previous_month_utc8()
+    except ValueError as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 2
+    if not args.pdf and not args.xlsx:
+        print("错误: 请指定 --pdf 和/或 --xlsx 输出路径", file=sys.stderr)
+        return 2
+
+    cache_dir = Path(args.cache_dir).expanduser()
+    cache = FileCache(cache_dir)
+    creds = None
+    if not args.mock:
+        try:
+            creds = load_credentials()
+        except MissingCredentialsError as exc:
+            print(f"错误: {exc}", file=sys.stderr)
+            return 2
+        LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
+
+    from cos_cost.ext.export import ReportExporter, build_report_payload
+    from cos_cost.web.service import DashboardService
+
+    bundle = build_bundle(mock=args.mock, creds=creds)
+    snapshot = collect(bundle, month, cache, force=args.force, creds=creds)
+    ranking = build_ranking(snapshot)
+    service = DashboardService(
+        mock=args.mock, cache_dir=cache_dir, creds=creds, force=args.force
+    )
+    account = service.account(month)
+    payload = build_report_payload(
+        snapshot,
+        ranking,
+        composition={item["key"]: item["value"] for item in account["composition"]["items"]},
+        trend=account.get("trend"),
+    )
+    exporter = ReportExporter()
+    if args.pdf:
+        dest = Path(args.pdf).expanduser()
+        exporter.write_pdf(payload, dest)
+        print(f"已写 PDF {dest}")
+    if args.xlsx:
+        dest = Path(args.xlsx).expanduser()
+        exporter.write_xlsx(payload, dest)
+        print(f"已写 Excel {dest}")
+    return 0
+
+
 def _run_serve(args: argparse.Namespace) -> int:
     try:
         if args.month:
@@ -113,7 +164,7 @@ def _run_serve(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cos_cost",
-        description="腾讯云 COS 成本分析 Agent（M1 CLI + M2 只读看板）",
+        description="腾讯云 COS 成本分析 Agent（M1 CLI + M2 看板 + M3 规则/导出/问答）",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -127,6 +178,11 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common(serve_p)
     serve_p.add_argument("--host", default="0.0.0.0", help="监听地址，默认 0.0.0.0")
     serve_p.add_argument("--port", type=int, default=18765, help="端口，默认 18765")
+
+    export_p = sub.add_parser("export", help="导出一页 PDF / 五表 Excel")
+    _add_common(export_p)
+    export_p.add_argument("--pdf", help="PDF 输出路径")
+    export_p.add_argument("--xlsx", help="Excel 输出路径")
     return parser
 
 
