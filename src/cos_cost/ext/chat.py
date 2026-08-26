@@ -90,13 +90,15 @@ def answer_question(
 
 def classify_intent(question: str, buckets: list[str]) -> tuple[str, str | None]:
     q = question.strip()
-    if any(token in q for token in ("导出", "一页", "pdf", "PDF", "excel", "Excel")):
-        return INTENT_EXPORT, None
     bucket = _match_bucket(q, buckets)
-    if any(token in q for token in ("怎么省", "如何省", "怎样省", "省钱", "优化")):
+    if any(token in q for token in ("为什么贵", "为何贵", "怎么贵")):
+        return INTENT_WHY, bucket
+    if any(token in q for token in ("怎么省", "如何省", "怎样省", "省钱")):
         return INTENT_SAVE, bucket
     if bucket and any(token in q for token in ("怎么", "如何")):
         return INTENT_SAVE, bucket
+    if any(token in q for token in ("导出", "一页", "pdf", "PDF", "excel", "Excel")):
+        return INTENT_EXPORT, None
     return INTENT_WHY, bucket
 
 
