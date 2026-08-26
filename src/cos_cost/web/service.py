@@ -6,6 +6,7 @@ from calendar import monthrange
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import threading
 
 from cos_cost.billing_items import (
     CATEGORY_COLORS,
@@ -15,10 +16,11 @@ from cos_cost.billing_items import (
     compose_categories,
 )
 from cos_cost.cache import FileCache
+from cos_cost.clients.errors import CollectCancelled
 from cos_cost.clients.factory import build_bundle
 from cos_cost.clients.mock import load_fixture
 from cos_cost.clients.protocols import ClientBundle
-from cos_cost.collect import collect
+from cos_cost.collect import CollectProgress, attach_cancel, collect, load_bucket_configs
 from cos_cost.ext.config_lights import SnapshotConfigLights
 from cos_cost.ext.opportunity import RuleEngine
 from cos_cost.ext.placeholders import COLUMN_LABELS
@@ -29,7 +31,7 @@ from cos_cost.local_creds import (
     load_local_creds,
     save_local_creds,
 )
-from cos_cost.models import CollectSnapshot, RankingResult, RankingRow
+from cos_cost.models import BucketInfo, CollectSnapshot, RankingResult, RankingRow
 from cos_cost.monthutil import parse_month, previous_month_utc8, shift_month
 from cos_cost.ranking import build_ranking
 from cos_cost.secrets import (
@@ -59,6 +61,10 @@ class DashboardService:
         self.model_api_key: str | None = None
         self.last_collect_error: str | None = None
         self.last_collect_warning: str | None = None
+        self._job_progress = CollectProgress()
+        self._job_cancel = threading.Event()
+        self._job_thread: threading.Thread | None = None
+        self._job_lock = threading.Lock()
         if creds is None and not mock:
             stored = load_local_creds(self.creds_path)
             if stored:
@@ -106,6 +112,7 @@ class DashboardService:
             "last_collect_error": err,
             "last_collect_warning": warn,
             "local_only": True,
+            "job": self.job_status(),
         }
 
     def save_credentials(
@@ -144,11 +151,90 @@ class DashboardService:
             self.last_collect_error = classify_collect_error(
                 sanitize_error_text(str(exc), secret_key=skey, secret_id=sid)
             )
-            return self.settings_status()
-        self._snapshot(month or self.default_month(), force=True)
-        return self.settings_status()
+            status = self.settings_status()
+            status["status"] = "error"
+            return status
+        return self.start_collect_job(month or self.default_month(), force=True)
+
+    def job_status(self) -> dict[str, Any]:
+        snap = self._job_progress.snapshot()
+        if self.last_collect_error and not snap.get("error"):
+            snap["error"] = self.last_collect_error
+        return snap
+
+    def job_is_running(self) -> bool:
+        thread = self._job_thread
+        return thread is not None and thread.is_alive()
+
+    def start_collect_job(self, month: str, *, force: bool = True) -> dict[str, Any]:
+        with self._job_lock:
+            if self.job_is_running():
+                out = self.settings_status()
+                out["status"] = "running"
+                return out
+            self._job_cancel = threading.Event()
+            self._job_progress = CollectProgress()
+            self._job_progress.update(status="running", phase="列桶", done=False, error=None)
+            self.last_collect_error = None
+            self.last_collect_warning = None
+            thread = threading.Thread(
+                target=self._collect_worker,
+                args=(month, force),
+                name="cos-collect",
+                daemon=True,
+            )
+            self._job_thread = thread
+            thread.start()
+        out = self.settings_status()
+        out["status"] = "running"
+        return out
+
+    def cancel_collect(self) -> dict[str, Any]:
+        self._job_cancel.set()
+        attach_cancel(self.bundle, self._job_cancel)
+        self._job_progress.update(phase="正在停止")
+        out = self.settings_status()
+        out["status"] = "cancelling"
+        return out
+
+    def _collect_worker(self, month: str, force: bool) -> None:
+        secret_key = self.creds.secret_key if self.creds else None
+        secret_id = self.creds.secret_id if self.creds else None
+        attach_cancel(self.bundle, self._job_cancel)
+        try:
+            snapshot = collect(
+                self.bundle,
+                month,
+                self.cache,
+                force=force,
+                creds=self.creds,
+                cancel=self._job_cancel,
+                progress=self._job_progress,
+            )
+            if self._job_cancel.is_set():
+                self._job_progress.update(
+                    done=True, status="cancelled", phase="已停止", error=None
+                )
+                return
+            self._note_collect_outcome(snapshot, secret_key=secret_key, secret_id=secret_id)
+            err = self.last_collect_error
+            self._job_progress.update(
+                done=True,
+                status="error" if err else "done",
+                phase="失败" if err else "完成",
+                error=err,
+            )
+        except CollectCancelled:
+            self._job_progress.update(done=True, status="cancelled", phase="已停止", error=None)
+        except Exception as exc:  # noqa: BLE001
+            err = classify_collect_error(
+                sanitize_error_text(str(exc), secret_key=secret_key, secret_id=secret_id)
+            )
+            self.last_collect_error = err
+            self._job_progress.update(done=True, status="error", phase="失败", error=err)
 
     def use_mock(self) -> dict[str, Any]:
+        self.cancel_collect()
         clear_local_creds(self.creds_path)
         self.creds = None
         self.mock = True
@@ -158,9 +244,16 @@ class DashboardService:
         self.last_collect_warning = None
         self.fixture = load_fixture()
         self.bundle = build_bundle(mock=True)
+        self._job_progress = CollectProgress()
+        self._job_progress.update(done=True, status="idle", phase="")
         return self.settings_status()
 
     def _snapshot(self, month: str, *, force: bool | None = None) -> CollectSnapshot:
+        if (
+            self.job_is_running()
+            and threading.current_thread() is not self._job_thread
+        ):
+            return _empty_snapshot(month, mock=self.mock)
         use_force = self.force if force is None else force
         secret_key = self.creds.secret_key if self.creds else None
         secret_id = self.creds.secret_id if self.creds else None
@@ -168,6 +261,8 @@ class DashboardService:
             snapshot = collect(
                 self.bundle, month, self.cache, force=use_force, creds=self.creds
             )
+        except CollectCancelled:
+            return _empty_snapshot(month, mock=self.mock)
         except Exception as exc:  # noqa: BLE001 — 鉴权/网络错误展示在本机 UI
             self.last_collect_error = classify_collect_error(
                 sanitize_error_text(str(exc), secret_key=secret_key, secret_id=secret_id)
@@ -266,6 +361,27 @@ class DashboardService:
     def bucket(self, bucket: str, month: str | None = None) -> dict[str, Any]:
         month = parse_month(month) if month else self.default_month()
         snapshot = self._snapshot(month)
+        if snapshot.config is None or bucket not in snapshot.config.by_bucket:
+            try:
+                listed = snapshot.buckets or [BucketInfo(name=bucket, region=None)]
+                extra = load_bucket_configs(
+                    self.bundle,
+                    self.cache,
+                    snapshot.account_key,
+                    listed,
+                    [bucket],
+                    creds=self.creds,
+                )
+                if snapshot.config is None:
+                    snapshot.config = extra
+                else:
+                    snapshot.config.by_bucket.update(extra.by_bucket)
+                    if extra.extra_buckets:
+                        snapshot.config.extra_buckets = extra.extra_buckets
+            except CollectCancelled:
+                pass
+            except Exception:  # noqa: BLE001 — 桶页配置失败不阻断排行
+                pass
         engine, lights = _engines(snapshot)
         ranking = build_ranking(snapshot, opportunity=engine, lights=lights)
         row = next((r for r in ranking.rows if r.bucket == bucket), None)

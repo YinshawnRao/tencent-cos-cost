@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -20,6 +21,20 @@ def _client(tmp_path: Path, *, mock: bool = True) -> TestClient:
     creds = tmp_path / ".local-creds.json"
     service = DashboardService(mock=mock, cache_dir=cache, creds_path=creds)
     return TestClient(create_app(service))
+
+
+def _wait_job(client: TestClient, timeout: float = 8.0) -> dict:
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        r = client.get("/api/settings/job")
+        assert r.status_code == 200
+        last = r.json()
+        assert "secret_key" not in last
+        if last.get("done"):
+            return last
+        time.sleep(0.02)
+    raise AssertionError(f"job not done: {last}")
 
 
 def _patch_live_bundle(monkeypatch) -> None:
@@ -73,7 +88,11 @@ def test_post_credentials_does_not_leak_secret_key(tmp_path: Path, monkeypatch) 
     assert body["saved"] is True
     assert body["secret_id_masked"] == "AKID****2345"
     assert body["month"] == "2026-07"
-    assert body.get("last_collect_error") in (None, "")
+    assert body.get("status") in ("running", "done", "error")
+    job = _wait_job(client)
+    assert dummy_key not in json.dumps(job)
+    assert job["done"] is True
+    assert job.get("error") in (None, "")
 
     status = client.get("/api/settings/status").json()
     assert status["mode"] == "live"
@@ -115,6 +134,7 @@ def test_switch_back_to_mock(tmp_path: Path, monkeypatch) -> None:
         "/api/settings/credentials",
         json={"secret_id": "AKIDxxxxYYYY", "secret_key": "k", "month": "2026-07"},
     )
+    _wait_job(client)
     r = client.post("/api/settings/mock")
     assert r.status_code == 200
     body = r.json()
@@ -142,9 +162,9 @@ def test_collect_auth_error_shown_without_leaking_key(tmp_path: Path, monkeypatc
     )
     assert r.status_code == 200, r.text
     assert dummy_key not in r.text
-    body = r.json()
-    assert body["mode"] == "live"
-    assert "鉴权失败" in (body.get("last_collect_error") or "")
+    job = _wait_job(client)
+    assert dummy_key not in json.dumps(job)
+    assert "鉴权失败" in (job.get("error") or "")
     page = client.get("/", params={"month": "2026-07"})
     assert page.status_code == 200
     assert dummy_key not in page.text
@@ -195,3 +215,47 @@ def test_health_includes_mode(tmp_path: Path) -> None:
     r = client.get("/api/health")
     assert r.json()["ok"] is True
     assert r.json()["mode"] in ("mock", "live")
+
+
+def test_settings_job_poll_and_cancel(tmp_path: Path, monkeypatch) -> None:
+    import threading
+
+    from cos_cost.clients.errors import check_cancel
+    from cos_cost.web.service import _empty_snapshot
+
+    started = threading.Event()
+
+    def slow_collect(*_a, **kwargs):
+        cancel = kwargs.get("cancel")
+        progress = kwargs.get("progress")
+        started.set()
+        if progress is not None:
+            progress.update(status="running", phase="监控", buckets_total=80, buckets_done=0)
+        for i in range(80):
+            check_cancel(cancel)
+            time.sleep(0.04)
+            if progress is not None:
+                progress.update(phase="监控", buckets_done=i + 1, buckets_total=80)
+        return _empty_snapshot("2026-07", mock=False)
+
+    _patch_live_bundle(monkeypatch)
+    monkeypatch.setattr("cos_cost.web.service.collect", slow_collect)
+    client = _client(tmp_path)
+    r = client.post(
+        "/api/settings/credentials",
+        json={"secret_id": "AKIDabcdefghijklmnopqrstuvwxyz012345", "secret_key": "k", "month": "2026-07"},
+    )
+    assert r.status_code == 200
+    assert r.json().get("status") in ("running", "done", "cancelled")
+    assert started.wait(timeout=2)
+    job = client.get("/api/settings/job").json()
+    assert "phase" in job
+    assert "buckets_done" in job
+    assert "buckets_total" in job
+    if not job.get("done"):
+        stop = client.post("/api/settings/job/cancel")
+        assert stop.status_code == 200
+        last = _wait_job(client, timeout=4)
+        assert last["done"] is True
+        assert last.get("status") in ("cancelled", "done", "error")
+        assert last.get("phase") in ("已停止", "正在停止", "监控", "完成", "失败")

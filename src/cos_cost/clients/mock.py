@@ -132,9 +132,20 @@ class MockMonitorClient:
         self.fixture = fixture
         self.deny = deny
 
-    def pull_cos_metrics(self, month: str, buckets: list[str]) -> MonitorSnapshot:
+    def pull_cos_metrics(
+        self,
+        month: str,
+        buckets: list[str],
+        *,
+        metrics=None,
+        cancel=None,
+        progress=None,
+    ) -> MonitorSnapshot:
         if self.deny:
             raise PermissionDeniedError("monitor", "mock: GetMonitorData denied")
+        from cos_cost.clients.errors import check_cancel
+
+        check_cancel(cancel)
         months = self.fixture.get("months") or {}
         block = months.get(month) or {}
         raw = block.get("monitor") or {}

@@ -42,7 +42,27 @@
   const savedLine = document.getElementById("settings-saved");
   const progress = document.getElementById("settings-progress");
   const errBox = document.getElementById("settings-error");
+  const stopBtn = document.getElementById("settings-stop");
   const settings = data.settings || {};
+  let pollTimer = null;
+
+  function jobLine(job) {
+    if (!job) return "";
+    const phase = job.phase || "拉取";
+    const counts = job.buckets_total ? ` ${job.buckets_done || 0}/${job.buckets_total}` : "";
+    return `正在${phase}${counts}…`;
+  }
+
+  function setProgress(job, visible) {
+    if (!progress) return;
+    if (visible) {
+      progress.hidden = false;
+      progress.textContent = jobLine(job) || "正在拉取…";
+    } else {
+      progress.hidden = true;
+    }
+    if (stopBtn) stopBtn.hidden = !visible;
+  }
 
   function applyStatus(status) {
     if (!status) return;
@@ -92,7 +112,8 @@
         month: (document.getElementById("settings-month") || {}).value || data.month,
         model_api_key: (document.getElementById("settings-model-key") || {}).value || "",
       };
-      if (progress) { progress.hidden = false; progress.textContent = "正在拉取账单 / 监控 / 配置…"; }
+      if (progress) { progress.hidden = false; progress.textContent = "正在保存密钥并开始拉取…"; }
+      if (stopBtn) stopBtn.hidden = false;
       if (errBox) { errBox.hidden = true; }
       try {
         const resp = await fetch("/api/settings/credentials", {
@@ -107,17 +128,18 @@
             errBox.hidden = false;
             errBox.textContent = errorText(status, "保存失败");
           }
+          setProgress(null, false);
           return;
         }
         const month = status.month || body.month || data.month;
-        window.location.href = `/?month=${encodeURIComponent(month)}`;
+        await watchJob(month, status.job || status);
       } catch (err) {
         if (errBox) {
           errBox.hidden = false;
           errBox.textContent = "保存失败，请检查网络或 CAM。";
         }
+        setProgress(null, false);
       } finally {
-        if (progress) progress.hidden = true;
         const keyInput = document.getElementById("settings-secret-key");
         if (keyInput) keyInput.value = "";
         const sid = document.getElementById("settings-secret-id");
@@ -128,6 +150,60 @@
         if (mk) mk.value = "";
       }
     });
+  }
+
+  async function watchJob(month, first) {
+    let job = first || {};
+    const tick = async () => {
+      if (!job.done) {
+        try {
+          const resp = await fetch("/api/settings/job");
+          job = await resp.json();
+        } catch (err) {
+          job = { done: true, error: "进度查询失败", status: "error" };
+        }
+      }
+      setProgress(job, !job.done && job.status !== "idle");
+      if (job.error && errBox) {
+        errBox.hidden = false;
+        errBox.textContent = job.error;
+      }
+      if (!job.done && job.status !== "cancelled") {
+        pollTimer = window.setTimeout(tick, 400);
+        return;
+      }
+      setProgress(job, false);
+      if (job.status === "cancelled") {
+        if (progress) {
+          progress.hidden = false;
+          progress.textContent = "已停止拉取。";
+        }
+        return;
+      }
+      window.location.href = `/?month=${encodeURIComponent(month)}`;
+    };
+    await tick();
+  }
+
+  if (stopBtn) {
+    stopBtn.addEventListener("click", async () => {
+      if (pollTimer) window.clearTimeout(pollTimer);
+      try {
+        await fetch("/api/settings/job/cancel", { method: "POST" });
+      } catch (err) { /* ignore */ }
+      if (progress) {
+        progress.hidden = false;
+        progress.textContent = "正在停止…";
+      }
+      pollTimer = window.setTimeout(() => watchJob(data.month), 300);
+    });
+  }
+
+  const runningJob = settings.job;
+  if (runningJob && !runningJob.done && runningJob.status === "running") {
+    if (panel) panel.hidden = false;
+    setProgress(runningJob, true);
+    watchJob(data.month, runningJob);
   }
 
   async function backToMock() {

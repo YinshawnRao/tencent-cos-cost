@@ -156,6 +156,14 @@ def create_app(service: DashboardService) -> FastAPI:
                 ),
             ) from exc
 
+    @app.get("/api/settings/job")
+    def api_settings_job() -> dict:
+        return service.job_status()
+
+    @app.post("/api/settings/job/cancel")
+    def api_settings_job_cancel() -> dict:
+        return service.cancel_collect()
+
     @app.post("/api/settings/mock")
     def api_settings_mock() -> dict:
         return service.use_mock()

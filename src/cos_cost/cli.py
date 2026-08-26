@@ -6,11 +6,13 @@ import argparse
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 from cos_cost.cache import FileCache
+from cos_cost.clients.errors import CollectCancelled
 from cos_cost.clients.factory import build_bundle
-from cos_cost.collect import collect
+from cos_cost.collect import attach_cancel, collect
 from cos_cost.formatters import collect_json, ranking_json, ranking_table
 from cos_cost.monthutil import parse_month, previous_month_utc8
 from cos_cost.ranking import build_ranking
@@ -49,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         LOG.info("使用 SecretId=%s（SecretKey 已隐藏）", redact_secret_id(creds.secret_id))
 
     bundle = build_bundle(mock=args.mock, creds=creds)
-    snapshot = collect(bundle, month, cache, force=args.force, creds=creds)
+    snapshot = _collect_with_sigint(bundle, month, cache, force=args.force, creds=creds)
+    if snapshot is None:
+        return 130
 
     if args.command == "collect":
         hits = ", ".join(snapshot.cache_hits) if snapshot.cache_hits else "无（已回源）"
@@ -74,6 +78,27 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(ranking_table(ranking), end="")
     return 0
+
+
+def _collect_with_sigint(bundle, month, cache, *, force, creds):
+    import signal
+
+    cancel = threading.Event()
+
+    def _on_sigint(signum, frame):  # noqa: ARG001
+        cancel.set()
+        attach_cancel(bundle, cancel)
+        LOG.info("收到中断，正在停止拉取（当前腾讯云 SDK 调用结束后生效）…")
+
+    prev = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _on_sigint)
+    try:
+        return collect(bundle, month, cache, force=force, creds=creds, cancel=cancel)
+    except CollectCancelled:
+        print("已停止拉取。", file=sys.stderr)
+        return None
+    finally:
+        signal.signal(signal.SIGINT, prev)
 
 
 def _run_export(args: argparse.Namespace) -> int:
@@ -101,7 +126,9 @@ def _run_export(args: argparse.Namespace) -> int:
     from cos_cost.web.service import DashboardService
 
     bundle = build_bundle(mock=args.mock, creds=creds)
-    snapshot = collect(bundle, month, cache, force=args.force, creds=creds)
+    snapshot = _collect_with_sigint(bundle, month, cache, force=args.force, creds=creds)
+    if snapshot is None:
+        return 130
     ranking = build_ranking(snapshot)
     service = DashboardService(
         mock=args.mock, cache_dir=cache_dir, creds=creds, force=args.force
@@ -173,6 +200,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     port = args.port
     LOG.info("打开 http://%s:%s/  （mode=%s）", host, port, "mock" if service.mock else "live")
     LOG.info("本机测试请勿把 serve 暴露到公网。")
+    LOG.info("Ctrl+C 应能退出；若卡住可用 kill -9 $(lsof -tiTCP:%s)", port)
     uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 

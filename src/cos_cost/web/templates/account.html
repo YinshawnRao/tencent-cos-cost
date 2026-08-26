@@ -26,6 +26,9 @@
 </form>
 
 <div class="banner {% if payload.estimated %}warn{% endif %}">{{ payload.banner }}</div>
+{% if payload.settings and payload.settings.job and payload.settings.job.status == "running" %}
+<div class="banner" id="collect-job-banner">正在{{ payload.settings.job.phase or "拉取" }}{% if payload.settings.job.buckets_total %} {{ payload.settings.job.buckets_done }}/{{ payload.settings.job.buckets_total }}{% endif %}…</div>
+{% endif %}
 {% if payload.settings and payload.settings.last_collect_error %}
 <div class="banner warn" id="collect-error">{{ payload.settings.last_collect_error }}</div>
 {% endif %}
@@ -57,10 +60,11 @@
       <label>模型 API Key（未使用，问答仍走模板）
         <input type="password" name="model_api_key" id="settings-model-key" autocomplete="new-password" placeholder="预留，当前不用">
       </label>
-      <p class="settings-progress" id="settings-progress" hidden>正在拉取账单 / 监控 / 配置…</p>
+      <p class="settings-progress" id="settings-progress" hidden>正在拉取…</p>
       <p class="settings-error" id="settings-error" hidden></p>
       <div class="settings-actions">
         <button class="btn" type="submit">保存并拉取</button>
+        <button class="btn ghost dark" type="button" id="settings-stop" hidden>停止拉取</button>
         <button class="btn ghost dark" type="button" id="settings-mock">改用 mock 数据</button>
         <button class="btn ghost dark" type="button" id="settings-clear">清除密钥</button>
       </div>
