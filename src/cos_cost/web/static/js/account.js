@@ -109,13 +109,6 @@
           }
           return;
         }
-        if (status.last_collect_error) {
-          if (errBox) {
-            errBox.hidden = false;
-            errBox.textContent = status.last_collect_error;
-          }
-          return;
-        }
         const month = status.month || body.month || data.month;
         window.location.href = `/?month=${encodeURIComponent(month)}`;
       } catch (err) {
@@ -127,6 +120,8 @@
         if (progress) progress.hidden = true;
         const keyInput = document.getElementById("settings-secret-key");
         if (keyInput) keyInput.value = "";
+        const sid = document.getElementById("settings-secret-id");
+        if (sid) sid.value = "";
         const tok = document.getElementById("settings-token");
         if (tok) tok.value = "";
         const mk = document.getElementById("settings-model-key");

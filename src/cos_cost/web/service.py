@@ -199,7 +199,12 @@ class DashboardService:
             )
         elif any(
             n in compact
-            for n in ("authfailure", "invalidsecret", "signaturedoesnotmatch")
+            for n in (
+                "authfailure",
+                "invalidsecret",
+                "invalidaccesskey",
+                "signaturedoesnotmatch",
+            )
         ):
             self.last_collect_error = "鉴权失败：SecretId / SecretKey 不正确。"
         elif "权限" in notes:

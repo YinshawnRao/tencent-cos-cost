@@ -91,6 +91,9 @@ def classify_collect_error(message: str) -> str:
         for n in (
             "authfailure",
             "invalidsecretid",
+            "invalidaccesskeyid",
+            "invalidaccesskey",
+            "theaccesskeyidyouprovided",
             "signaturedoesnotmatch",
             "secretidnotfound",
         )

@@ -168,6 +168,16 @@ def test_status_reads_local_creds_file(tmp_path: Path, monkeypatch) -> None:
     assert "SECRETKEY_NEVER_LEAK" not in json.dumps(status)
 
 
+def test_classify_cos_invalid_access_key() -> None:
+    from cos_cost.secrets import classify_collect_error
+
+    raw = (
+        "{'code': 'InvalidAccessKeyId', 'message': "
+        "'The Access Key Id you provided does not exist in our records'}"
+    )
+    assert "鉴权失败" in classify_collect_error(raw)
+
+
 def test_missing_credentials_returns_400_without_key(tmp_path: Path) -> None:
     client = _client(tmp_path)
     dummy_key = "SECRETKEY_NEVER_LEAK_THIS_VALUE_12345"
